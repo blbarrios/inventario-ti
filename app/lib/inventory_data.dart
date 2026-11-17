@@ -163,6 +163,7 @@ class Asset {
       {this.status = AssetStatus.unknown,
       DeviceIcon? icon,
       String? id,
+      this.responsible = '',
       this.statusVersion = 1,
       this.hasPosition = true})
       : id = id ?? code,
@@ -180,13 +181,21 @@ class Asset {
       status: statusFromApi(json['status'] as String? ?? 'unknown'),
       statusVersion: (json['status_version'] as num?)?.toInt() ?? 1,
       icon: deviceIconFromKey(json['icon'] as String? ?? 'generic'),
+      responsible: json['responsible'] as String? ?? '',
       hasPosition: x != null && y != null,
     );
   }
 
   /// Server id (a uuid from the API, or the code for demo/local data).
   final String id;
-  final String code, name, type;
+
+  /// The code is the stable identifier; name and type can be edited.
+  final String code;
+  String name;
+  String type;
+
+  /// Optional person responsible for this device (free text; '' when none).
+  String responsible;
   Offset position;
 
   /// Whether the server has a saved position; false until a layout is saved.
@@ -208,9 +217,61 @@ class Asset {
   }
 }
 
+/// A drawn zone on the plan that equipment sits on or near.
+enum RoomItemKind { table, row, rack }
+
+extension RoomItemKindView on RoomItemKind {
+  String get api => name;
+  String get label => switch (this) {
+        RoomItemKind.table => 'Mesa',
+        RoomItemKind.row => 'Fila',
+        RoomItemKind.rack => 'Rack',
+      };
+  IconData get icon => switch (this) {
+        RoomItemKind.table => Icons.table_restaurant_outlined,
+        RoomItemKind.row => Icons.table_rows_outlined,
+        RoomItemKind.rack => Icons.dns_outlined,
+      };
+}
+
+RoomItemKind roomItemKindFromApi(String value) => RoomItemKind.values
+    .firstWhere((k) => k.name == value, orElse: () => RoomItemKind.table);
+
+class RoomItem {
+  RoomItem(this.kind, this.rect, {this.label = ''});
+
+  factory RoomItem.fromJson(Map<String, dynamic> json) => RoomItem(
+        roomItemKindFromApi(json['kind'] as String? ?? 'table'),
+        Rect.fromLTWH(
+          (json['x'] as num).toDouble(),
+          (json['y'] as num).toDouble(),
+          (json['width'] as num).toDouble(),
+          (json['height'] as num).toDouble(),
+        ),
+        label: json['label'] as String? ?? '',
+      );
+
+  RoomItemKind kind;
+  String label;
+
+  /// Normalized rectangle (x, y, width, height all in 0..1).
+  Rect rect;
+
+  Map<String, dynamic> toLayoutJson() => {
+        'kind': kind.api,
+        'label': label,
+        'x': rect.left,
+        'y': rect.top,
+        'width': rect.width,
+        'height': rect.height,
+      };
+}
+
 class Room {
-  Room(this.name, this.assets, {String? id, this.layoutVersion = 1})
-      : id = id ?? name;
+  Room(this.name, this.assets,
+      {String? id, this.layoutVersion = 1, List<RoomItem>? items})
+      : id = id ?? name,
+        items = items ?? [];
 
   factory Room.fromJson(Map<String, dynamic> json) => Room(
         json['name'] as String,
@@ -220,11 +281,18 @@ class Room {
         ],
         id: json['id'] as String,
         layoutVersion: (json['layout_version'] as num?)?.toInt() ?? 1,
+        items: [
+          for (final item in (json['items'] as List? ?? const []))
+            RoomItem.fromJson(item as Map<String, dynamic>),
+        ],
       );
 
   final String id;
   final String name;
   final List<Asset> assets;
+
+  /// Drawn zones (tables, rows, racks) that equipment sits on.
+  final List<RoomItem> items;
 
   /// Optimistic-concurrency token for layout (position) updates.
   int layoutVersion;

@@ -224,4 +224,51 @@ void main() {
     await tester.pumpAndSettle();
     expect(asset.icon, DeviceIcon.laptop);
   });
+
+  testWidgets('Se edita el nombre de un equipo existente', (tester) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final asset =
+        Asset('PC-01', 'Equipo piloto', 'Computador', const Offset(.3, .3));
+    await tester.pumpWidget(_room(Room('Sala piloto', [asset])));
+
+    await tester.tap(find.byType(Marker));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Editar equipo'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextFormField, 'Equipo piloto'),
+        'Equipo renombrado');
+    await tester.enterText(
+        find.widgetWithText(TextFormField, 'Computador'), 'Servidor');
+    await tester.tap(find.widgetWithText(FilledButton, 'Guardar cambios'));
+    await tester.pumpAndSettle();
+
+    expect(asset.name, 'Equipo renombrado');
+    expect(asset.type, 'Servidor');
+    expect(find.text('Guardar cambios'), findsNothing);
+  });
+
+  testWidgets('Se agrega una zona al plano y se guarda', (tester) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final room = Room('Sala piloto',
+        [Asset('PC-01', 'Equipo piloto', 'Computador', const Offset(.3, .3))]);
+    await tester.pumpWidget(_room(room));
+
+    await tester.tap(find.text('Editar distribución'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Mesa'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Guardar plano'));
+    await tester.pumpAndSettle();
+
+    expect(room.items, hasLength(1));
+    expect(room.items.single.kind, RoomItemKind.table);
+  });
 }

@@ -16,7 +16,8 @@ type Status = typeof statusValues[number];
 type Icon = typeof iconValues[number];
 type Id = { Params: { id: string } };
 type StatusChange = { status: Status; version: number; note?: string };
-type AssetInput = { code: string; name: string; type: string; roomId?: string; icon?: Icon };
+type AssetInput = { code: string; name: string; type: string; roomId?: string; icon?: Icon; responsible?: string };
+type AssetEdit = { name?: string; type?: string; responsible?: string };
 type RoomInput = { name: string };
 type Position = { assetId: string; x: number; y: number };
 type LayoutItem = {
@@ -107,10 +108,11 @@ export function registerInventoryRoutes(
         type: { type: 'string', minLength: 1, maxLength: 80 },
         roomId: id,
         icon: { type: 'string', enum: iconValues },
+        responsible: { type: 'string', maxLength: 200 },
       },
     } },
   }, async (request, reply) => {
-    const { roomId, icon } = request.body;
+    const { roomId, icon, responsible } = request.body;
     const { code, name, type } = request.body;
     const values = [code.trim(), name.trim(), type.trim()];
     if (values.some((value) => !value)) {
@@ -118,8 +120,9 @@ export function registerInventoryRoutes(
     }
     try {
       const result = await pool.query(`
-        INSERT INTO assets (code, name, type, room_id, icon) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-        [...values, roomId ?? null, icon ?? 'generic']);
+        INSERT INTO assets (code, name, type, room_id, icon, responsible)
+        VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+        [...values, roomId ?? null, icon ?? 'generic', (responsible ?? '').trim()]);
       return reply.code(201).send(result.rows[0]);
     } catch (error) {
       const pgError = error as { code?: string };
@@ -177,6 +180,33 @@ export function registerInventoryRoutes(
       return { code: 200, body: updated.rows[0] };
     });
     return reply.code(outcome.code).send(outcome.body);
+  });
+
+  app.patch<Id & { Body: AssetEdit }>('/assets/:id', {
+    schema: {
+      params: idParams,
+      body: {
+        type: 'object', additionalProperties: false, minProperties: 1,
+        properties: {
+          name: { type: 'string', minLength: 1, maxLength: 200 },
+          type: { type: 'string', minLength: 1, maxLength: 80 },
+          responsible: { type: 'string', maxLength: 200 },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const edits: Array<[string, string]> = [];
+    if (request.body.name !== undefined) edits.push(['name', request.body.name.trim()]);
+    if (request.body.type !== undefined) edits.push(['type', request.body.type.trim()]);
+    if (request.body.responsible !== undefined) edits.push(['responsible', request.body.responsible.trim()]);
+    if (edits.some(([, value]) => value === '')) {
+      return reply.code(400).send({ error: 'El nombre y el tipo no pueden quedar vacíos' });
+    }
+    const sets = edits.map(([column], index) => `${column} = $${index + 2}`).join(', ');
+    const result = await pool.query(
+      `UPDATE assets SET ${sets} WHERE id = $1 RETURNING *`,
+      [request.params.id, ...edits.map(([, value]) => value)]);
+    return result.rows[0] ?? reply.code(404).send({ error: 'Equipo no encontrado' });
   });
 
   app.patch<Id & { Body: { icon: Icon } }>('/assets/:id/icon', {

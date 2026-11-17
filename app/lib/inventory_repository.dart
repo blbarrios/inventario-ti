@@ -30,6 +30,15 @@ abstract class InventoryRepository {
     required String type,
     required DeviceIcon icon,
     required Offset position,
+    String responsible,
+  });
+
+  /// Edit an existing asset's textual fields (name, type, responsible).
+  Future<void> updateAsset(
+    Asset asset, {
+    required String name,
+    required String type,
+    required String responsible,
   });
   Future<void> updateStatus(Asset asset, AssetStatus status, String note);
   Future<void> updateIcon(Asset asset, DeviceIcon icon);
@@ -79,12 +88,26 @@ class DemoInventoryRepository implements InventoryRepository {
     required String type,
     required DeviceIcon icon,
     required Offset position,
+    String responsible = '',
   }) async {
     if (room.assets
         .any((a) => a.code.toLowerCase() == code.trim().toLowerCase())) {
       throw ApiException('El código del equipo ya existe.', duplicate: true);
     }
-    return Asset(code.trim(), name.trim(), type.trim(), position, icon: icon);
+    return Asset(code.trim(), name.trim(), type.trim(), position,
+        icon: icon, responsible: responsible.trim());
+  }
+
+  @override
+  Future<void> updateAsset(
+    Asset asset, {
+    required String name,
+    required String type,
+    required String responsible,
+  }) async {
+    asset.name = name.trim();
+    asset.type = type.trim();
+    asset.responsible = responsible.trim();
   }
 
   @override
@@ -185,6 +208,7 @@ class HttpInventoryRepository implements InventoryRepository {
     required String type,
     required DeviceIcon icon,
     required Offset position,
+    String responsible = '',
   }) async {
     final res = await _client.post(
       _uri('/assets'),
@@ -195,6 +219,7 @@ class HttpInventoryRepository implements InventoryRepository {
         'type': type.trim(),
         'roomId': room.id,
         'icon': icon.key,
+        'responsible': responsible.trim(),
       }),
     );
     if (res.statusCode == 409) {
@@ -205,6 +230,29 @@ class HttpInventoryRepository implements InventoryRepository {
       ..position = position
       ..hasPosition = false; // persisted on the next layout save
     return asset;
+  }
+
+  @override
+  Future<void> updateAsset(
+    Asset asset, {
+    required String name,
+    required String type,
+    required String responsible,
+  }) async {
+    final res = await _client.patch(
+      _uri('/assets/${asset.id}'),
+      headers: _jsonHeaders,
+      body: jsonEncode({
+        'name': name.trim(),
+        'type': type.trim(),
+        'responsible': responsible.trim(),
+      }),
+    );
+    if (res.statusCode != 200) _fail(res);
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    asset.name = body['name'] as String? ?? name.trim();
+    asset.type = body['type'] as String? ?? type.trim();
+    asset.responsible = body['responsible'] as String? ?? responsible.trim();
   }
 
   @override
@@ -259,7 +307,7 @@ class HttpInventoryRepository implements InventoryRepository {
               'y': asset.position.dy
             }
         ],
-        'items': const [],
+        'items': [for (final item in room.items) item.toLayoutJson()],
       }),
     );
     if (res.statusCode == 409) {

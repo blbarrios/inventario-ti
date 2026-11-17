@@ -97,6 +97,21 @@ flutter build windows --release --dart-define=USE_API=true --dart-define=API_BAS
 
 El ejecutable usa un token de sesión en memoria. Al cerrarlo, será necesario iniciar sesión de nuevo. La contraseña y la conexión PostgreSQL se configuran en el servidor. El ejecutable contiene únicamente la dirección HTTPS de la API.
 
+## Compilar Android y Windows para el servidor actual
+
+La dirección pública proporcionada por TI es https://track.optimusprogram.com. Desde la carpeta app se compilan ambas plataformas con la API y el acceso de TI activos.
+
+```sh
+flutter build apk --release --dart-define=USE_API=true --dart-define=API_BASE=https://track.optimusprogram.com
+flutter build windows --release --dart-define=USE_API=true --dart-define=API_BASE=https://track.optimusprogram.com
+```
+
+Android genera app/build/app/outputs/flutter-apk/app-release.apk. La copia de entrega está en app/build/Inventario-TI-Android.apk. El destino Android incorpora el permiso INTERNET. La configuración de firma actual utiliza la clave de desarrollo de Flutter para instalar el APK de prueba.
+
+Windows genera app/build/windows/x64/runner/Release/inventario_ti.exe. El ZIP app/build/Inventario-TI-Windows-x64.zip incluye el ejecutable, Flutter, los datos y las DLL de Visual C++ para x64. Extraer todos los archivos en una misma carpeta antes de abrir el ejecutable.
+
+El servidor respondió HTTP 200 en /api/health con la base conectada. Se comprobó el arranque de Windows desde una copia extraída del ZIP. El APK compiló correctamente y se validaron su firma y el permiso de Internet. Admite Android 7 (API 24) en adelante, con arquitecturas ARM de 32 y 64 bits y x86_64. La instalación del APK en un dispositivo físico queda pendiente, ya que no había dispositivos Android conectados durante la compilación.
+
 ## Verificación realizada
 
 Se probaron las migraciones y el alta y desactivación por consola contra PostgreSQL 17 local. Las pruebas HTTP verifican contraseña incorrecta, acceso anónimo, bloqueo de origen ajeno, cookie segura, restauración desde otra instancia de la API, token de escritorio, cierre de sesión, expiración, cuenta desactivada, límite de intentos y operador en historial.

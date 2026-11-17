@@ -255,6 +255,7 @@ class _AddAssetFormState extends State<_AddAssetForm> {
   final _name = TextEditingController();
   final _code = TextEditingController();
   final _type = TextEditingController();
+  final _responsible = TextEditingController();
 
   // The icon follows the type until the user picks one by hand.
   DeviceIcon _icon = DeviceIcon.generic;
@@ -270,6 +271,7 @@ class _AddAssetFormState extends State<_AddAssetForm> {
     _name.dispose();
     _code.dispose();
     _type.dispose();
+    _responsible.dispose();
     super.dispose();
   }
 
@@ -295,6 +297,7 @@ class _AddAssetFormState extends State<_AddAssetForm> {
         type: _type.text.trim(),
         icon: _icon,
         position: _nextPosition(),
+        responsible: _responsible.text.trim(),
       );
       navigator.pop(asset);
     } on ApiException catch (e) {
@@ -383,6 +386,15 @@ class _AddAssetFormState extends State<_AddAssetForm> {
               ],
             ),
             _Field(
+              label: 'Responsable (opcional)',
+              child: TextFormField(
+                controller: _responsible,
+                textCapitalization: TextCapitalization.words,
+                textInputAction: TextInputAction.done,
+                decoration: const InputDecoration(hintText: 'Ej. Soporte TI'),
+              ),
+            ),
+            _Field(
               label: 'Ícono',
               child: IconPicker(
                 value: _icon,
@@ -390,6 +402,108 @@ class _AddAssetFormState extends State<_AddAssetForm> {
                   _icon = icon;
                   _iconChosen = true;
                 }),
+              ),
+            ),
+          ],
+        ),
+      );
+}
+
+/// Edit an existing asset's name, type and responsible. Returns true if saved.
+Future<bool?> showEditAssetForm(BuildContext context,
+        {required InventoryRepository repo, required Asset asset}) =>
+    _showFormModal<bool>(
+      context,
+      builder: (_) => _EditAssetForm(repo: repo, asset: asset),
+    );
+
+class _EditAssetForm extends StatefulWidget {
+  const _EditAssetForm({required this.repo, required this.asset});
+  final InventoryRepository repo;
+  final Asset asset;
+
+  @override
+  State<_EditAssetForm> createState() => _EditAssetFormState();
+}
+
+class _EditAssetFormState extends State<_EditAssetForm> {
+  final _formKey = GlobalKey<FormState>();
+  late final _name = TextEditingController(text: widget.asset.name);
+  late final _type = TextEditingController(text: widget.asset.type);
+  late final _responsible =
+      TextEditingController(text: widget.asset.responsible);
+  bool _busy = false;
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _type.dispose();
+    _responsible.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (_busy || !_formKey.currentState!.validate()) return;
+    final navigator = Navigator.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _busy = true);
+    try {
+      await widget.repo.updateAsset(
+        widget.asset,
+        name: _name.text.trim(),
+        type: _type.text.trim(),
+        responsible: _responsible.text.trim(),
+      );
+      navigator.pop(true);
+    } on ApiException catch (e) {
+      if (mounted) {
+        setState(() => _busy = false);
+        messenger.showSnackBar(SnackBar(content: Text(e.message)));
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Form(
+        key: _formKey,
+        autovalidateMode: AutovalidateMode.onUnfocus,
+        child: _FormShell(
+          title: 'Editar equipo',
+          subtitle: 'Código ${widget.asset.code} (no se puede cambiar).',
+          actionLabel: 'Guardar cambios',
+          busy: _busy,
+          onSubmit: _submit,
+          fields: [
+            _Field(
+              label: 'Nombre del equipo',
+              top: 4,
+              child: TextFormField(
+                controller: _name,
+                autofocus: true,
+                textCapitalization: TextCapitalization.sentences,
+                textInputAction: TextInputAction.next,
+                validator: (value) =>
+                    (value ?? '').trim().isEmpty ? 'Escribe un nombre.' : null,
+              ),
+            ),
+            _Field(
+              label: 'Tipo',
+              child: TextFormField(
+                controller: _type,
+                textCapitalization: TextCapitalization.sentences,
+                textInputAction: TextInputAction.next,
+                validator: (value) =>
+                    (value ?? '').trim().isEmpty ? 'Indica el tipo.' : null,
+              ),
+            ),
+            _Field(
+              label: 'Responsable (opcional)',
+              child: TextFormField(
+                controller: _responsible,
+                textCapitalization: TextCapitalization.words,
+                textInputAction: TextInputAction.done,
+                onFieldSubmitted: (_) => _submit(),
+                decoration: const InputDecoration(hintText: 'Ej. Soporte TI'),
               ),
             ),
           ],

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'forms.dart';
 import 'inventory_data.dart';
 import 'inventory_repository.dart';
 import 'inventory_theme.dart';
@@ -229,6 +230,15 @@ class _AssetDetailState extends State<AssetDetail> {
     }
   }
 
+  Future<void> edit() async {
+    final saved = await showEditAssetForm(context,
+        repo: widget.repo, asset: widget.asset);
+    if (saved == true && mounted) {
+      setState(() {});
+      widget.onSaved();
+    }
+  }
+
   // The icon applies on tap; it reverts if the server rejects the change.
   Future<void> changeIcon(DeviceIcon icon) async {
     final previous = widget.asset.icon;
@@ -278,6 +288,11 @@ class _AssetDetailState extends State<AssetDetail> {
                   child: Text(asset.name, style: text.titleLarge)),
             ),
           ),
+          if (widget.editable)
+            IconButton(
+                onPressed: edit,
+                tooltip: 'Editar equipo',
+                icon: const Icon(Icons.edit_outlined)),
           IconButton(
               onPressed: widget.onClose,
               tooltip: 'Cerrar ficha',
@@ -297,6 +312,18 @@ class _AssetDetailState extends State<AssetDetail> {
                   Text('${asset.type} · ${widget.roomName}',
                       style: text.bodySmall),
                 ]),
+            if (asset.responsible.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Row(children: [
+                const Icon(Icons.person_outline_rounded,
+                    size: 16, color: inkFaint),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text('Responsable: ${asset.responsible}',
+                      style: text.bodySmall?.copyWith(color: inkSoft)),
+                ),
+              ]),
+            ],
             const SizedBox(height: 20),
             _CurrentStatus(asset.status),
             if (widget.editable) ...[

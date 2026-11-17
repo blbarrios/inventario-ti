@@ -119,3 +119,37 @@ cd app && flutter run -d chrome --dart-define=USE_API=true --dart-define=API_BAS
 - **Auth de TI**: en producción las rutas `/api/*` responden 503 hasta configurar el acceso (`registerInventoryRoutes` lo exige). Hay que definir el proveedor de identidad y validar la sesión antes de un despliegue útil con datos reales.
 - **SSE en vivo**: el README lo contempla (LISTEN/NOTIFY), pero la API aún no expone el endpoint. Hoy la app refleja los cambios propios al instante; para ver cambios de otros usuarios en vivo falta agregar el stream SSE y suscribirse desde el cliente.
 - Verificación: `flutter analyze` sin avisos, 18 tests en verde (incluye pruebas del cliente HTTP con `MockClient`), y `tsc` del backend compila.
+
+---
+
+## Responsable, Canvas ampliado, edición y CSV (2026-11-17)
+
+### Responsable (por equipo, texto libre)
+- Campo `responsible` en `assets` (migración `004_asset_responsible.js`), opcional.
+- Se captura en el alta y en la edición; se muestra en la ficha («Responsable: …»).
+- `POST /assets` lo acepta; `GET` lo devuelve.
+
+### Editar equipos existentes
+- Botón «Editar equipo» (lápiz) en la ficha → formulario para nombre, tipo y responsable. El **código no se cambia** (es el identificador).
+- Nuevo `PATCH /assets/:id` (nombre/tipo/responsable) en la API. El ícono se sigue cambiando aparte con `PATCH /assets/:id/icon`.
+
+### Canvas ampliado + mobiliario
+- Más zoom (hasta 5×) y más margen de desplazamiento.
+- **Zonas** (`room_items`: mesa, fila, rack) que ya existían en la BD: se dibujan en el plano detrás de los equipos, con etiqueta.
+- En «Editar distribución»: barra «Agregar zona», y cada zona se puede **seleccionar, arrastrar, redimensionar (asa inferior derecha), renombrar/cambiar tipo y eliminar**. Se guardan con «Guardar plano» (ahora el `PUT …/layout` envía las zonas; antes las borraba).
+
+### Importar CSV + plantilla
+- Menú ⋮ en la sala (modo edición): **Importar CSV** y **Descargar plantilla**.
+- Columnas: `codigo,nombre,tipo,icono,responsable,estado` (encabezados sin distinguir may/min ni acentos; `codigo/nombre/tipo` obligatorios). Acepta claves o etiquetas en español para ícono y estado.
+- El parser (`csv_import.dart`) entiende campos entre comillas y comas. Importa fila por fila con `POST /assets`, aplica el estado si no es «Sin verificar», persiste posiciones con un `PUT …/layout`, y muestra un resumen con los omitidos (p. ej. códigos repetidos).
+- La selección/descarga de archivo usa `dart:html` solo en web (con stub para tests/escritorio).
+
+### Verificación
+- `flutter analyze` sin avisos; **28 tests** en verde (incluye parser de CSV, edición, responsable y alta de zona); `tsc` del backend compila.
+
+### Pendiente para persistir todo
+Aplicar las migraciones nuevas antes de usar la API con datos reales:
+```bash
+npm --prefix api run migrate
+```
+Sigue pendiente lo de antes: auth de TI para producción y SSE en vivo.

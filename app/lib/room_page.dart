@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import 'asset_panel.dart';
+import 'csv_import.dart';
 import 'forms.dart';
 import 'inventory_data.dart';
 import 'inventory_repository.dart';
@@ -33,6 +34,11 @@ class _RoomPageState extends State<RoomPage> {
   bool showList = false;
   Map<Asset, Offset>? draft;
 
+  /// While editing the plan: a working copy of the room's zones, and the one
+  /// currently selected (so its controls show). Null when not editing.
+  List<RoomItem>? itemDraft;
+  RoomItem? selectedItem;
+
   @override
   void dispose() {
     transform.dispose();
@@ -41,7 +47,10 @@ class _RoomPageState extends State<RoomPage> {
   }
 
   void openAsset(Asset asset, bool wide) {
-    setState(() => selected = asset);
+    setState(() {
+      selected = asset;
+      selectedItem = null;
+    });
     if (wide || draft != null) return;
     showModalBottomSheet<void>(
       context: context,
@@ -80,9 +89,103 @@ class _RoomPageState extends State<RoomPage> {
     final next = positions[asset]! + translation;
     setState(() {
       selected = asset;
+      selectedItem = null;
       positions[asset] =
           Offset(next.dx.clamp(0.0, 1.0), next.dy.clamp(0.0, 1.0));
     });
+  }
+
+  // --- Zones (tables, rows, racks) -----------------------------------------
+
+  void addItem(RoomItemKind kind) {
+    final items = itemDraft;
+    if (items == null) return;
+    final item =
+        RoomItem(kind, const Rect.fromLTWH(0.35, 0.4, 0.3, 0.2), label: '');
+    setState(() {
+      items.add(item);
+      selectedItem = item;
+      selected = null;
+    });
+  }
+
+  void selectItem(RoomItem? item) => setState(() {
+        selectedItem = item;
+        if (item != null) selected = null;
+      });
+
+  void moveItem(RoomItem item, Offset deltaNorm) {
+    setState(() {
+      selectedItem = item;
+      final r = item.rect.shift(deltaNorm);
+      item.rect = Rect.fromLTWH(
+        r.left.clamp(0.0, 1 - item.rect.width),
+        r.top.clamp(0.0, 1 - item.rect.height),
+        item.rect.width,
+        item.rect.height,
+      );
+    });
+  }
+
+  void resizeItem(RoomItem item, Offset deltaNorm) {
+    setState(() {
+      selectedItem = item;
+      item.rect = Rect.fromLTWH(
+        item.rect.left,
+        item.rect.top,
+        (item.rect.width + deltaNorm.dx).clamp(0.08, 1 - item.rect.left),
+        (item.rect.height + deltaNorm.dy).clamp(0.06, 1 - item.rect.top),
+      );
+    });
+  }
+
+  void deleteItem(RoomItem item) => setState(() {
+        itemDraft?.remove(item);
+        if (selectedItem == item) selectedItem = null;
+      });
+
+  Future<void> editItem(RoomItem item) async {
+    final controller = TextEditingController(text: item.label);
+    var kind = item.kind;
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setLocal) => AlertDialog(
+          title: const Text('Zona'),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            Wrap(spacing: 8, children: [
+              for (final k in RoomItemKind.values)
+                ChoiceChip(
+                  label: Text(k.label),
+                  selected: kind == k,
+                  onSelected: (_) => setLocal(() => kind = k),
+                ),
+            ]),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              autofocus: true,
+              decoration: const InputDecoration(
+                  labelText: 'Etiqueta (opcional)', hintText: 'Ej. Rack A'),
+            ),
+          ]),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Cancelar')),
+            FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('Aplicar')),
+          ],
+        ),
+      ),
+    );
+    if (saved == true) {
+      setState(() {
+        item.label = controller.text.trim();
+        item.kind = kind;
+      });
+    }
   }
 
   Future<void> finishEdit({required bool save}) async {
@@ -90,9 +193,14 @@ class _RoomPageState extends State<RoomPage> {
       for (final entry in draft!.entries) {
         entry.key.position = entry.value;
       }
+      widget.room.items
+        ..clear()
+        ..addAll(itemDraft!);
     }
     setState(() {
       draft = null;
+      itemDraft = null;
+      selectedItem = null;
       selected = null;
     });
     if (!save) return;
@@ -110,7 +218,7 @@ class _RoomPageState extends State<RoomPage> {
 
   void zoom(double factor) {
     final current = transform.value.getMaxScaleOnAxis();
-    final next = (current * factor).clamp(1.0, 3.0);
+    final next = (current * factor).clamp(1.0, 5.0);
     if (next == 1) {
       transform.value = Matrix4.identity();
     } else {
@@ -150,6 +258,12 @@ class _RoomPageState extends State<RoomPage> {
 
   void startEditing() => setState(() {
         draft = {for (final asset in widget.room.assets) asset: asset.position};
+        itemDraft = [
+          for (final item in widget.room.items)
+            RoomItem(item.kind, item.rect, label: item.label)
+        ];
+        selectedItem = null;
+        selected = null;
         showList = false;
       });
 
@@ -171,6 +285,108 @@ class _RoomPageState extends State<RoomPage> {
     if (mounted) openAsset(asset, wide);
   }
 
+  void downloadTemplate() =>
+      downloadCsv('plantilla-inventario.csv', assetsCsvTemplate());
+
+  Future<void> importCsv() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final content = await pickCsvFile();
+    if (content == null || !mounted) return;
+    final result = parseAssetsCsv(content);
+    final problems = [
+      for (final e in result.errors) 'Fila ${e.line}: ${e.message}'
+    ];
+    final existing = {for (final a in widget.room.assets) a.code.toLowerCase()};
+    var added = 0;
+    for (final row in result.assets) {
+      if (existing.contains(row.code.toLowerCase())) {
+        problems.add('${row.code}: ya existe, se omitió');
+        continue;
+      }
+      try {
+        final asset = await widget.repo.createAsset(
+          widget.room,
+          code: row.code,
+          name: row.name,
+          type: row.type,
+          icon: row.icon,
+          responsible: row.responsible,
+          position: cascadePosition(widget.room.assets.length),
+        );
+        widget.room.assets.add(asset);
+        existing.add(row.code.toLowerCase());
+        if (row.status != AssetStatus.unknown) {
+          try {
+            await widget.repo.updateStatus(asset, row.status, 'Importado');
+          } on ApiException {
+            // Keep the asset even if the initial status couldn't be set.
+          }
+        }
+        added++;
+      } on ApiException catch (e) {
+        problems.add('${row.code}: ${e.message}');
+      }
+    }
+    if (added > 0) {
+      try {
+        await widget.repo.saveLayout(widget.room);
+      } on ApiException {
+        // Positions persist on the next layout save.
+      }
+    }
+    if (!mounted) return;
+    setState(() {});
+    widget.onChanged();
+    messenger.showSnackBar(SnackBar(
+        content: Text(
+            added == 1 ? '1 equipo importado' : '$added equipos importados')));
+    if (problems.isNotEmpty) await _showImportProblems(added, problems);
+  }
+
+  Future<void> _showImportProblems(int added, List<String> problems) =>
+      showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Resultado de la importación'),
+          content: SizedBox(
+            width: 420,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(added == 1
+                    ? '1 equipo agregado.'
+                    : '$added equipos agregados.'),
+                const SizedBox(height: 12),
+                Text('No se pudieron agregar ${problems.length}:',
+                    style: const TextStyle(fontWeight: FontWeight.w600)),
+                const SizedBox(height: 6),
+                Flexible(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        for (final problem in problems)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 2),
+                            child: Text('• $problem',
+                                style: const TextStyle(fontSize: 13)),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            FilledButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Entendido')),
+          ],
+        ),
+      );
+
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
@@ -186,6 +402,33 @@ class _RoomPageState extends State<RoomPage> {
         appBar: AppBar(
           title: Text(widget.room.name),
           actions: [
+            if (widget.editing && !editingMap)
+              PopupMenuButton<String>(
+                tooltip: 'Más acciones',
+                icon: const Icon(Icons.more_vert_rounded),
+                onSelected: (value) {
+                  if (value == 'import') importCsv();
+                  if (value == 'template') downloadTemplate();
+                },
+                itemBuilder: (_) => const [
+                  PopupMenuItem(
+                    value: 'import',
+                    child: ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(Icons.upload_file_outlined),
+                      title: Text('Importar CSV'),
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 'template',
+                    child: ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(Icons.download_outlined),
+                      title: Text('Descargar plantilla'),
+                    ),
+                  ),
+                ],
+              ),
             if (!widget.editing)
               const Padding(
                 padding: EdgeInsets.only(right: 16),
@@ -216,6 +459,12 @@ class _RoomPageState extends State<RoomPage> {
                       draft: activeDraft,
                       selected: detail,
                       controller: transform,
+                      items: itemDraft ?? widget.room.items,
+                      editingItems: editingMap,
+                      selectedItem: selectedItem,
+                      onSelectItem: selectItem,
+                      onMoveItem: moveItem,
+                      onResizeItem: resizeItem,
                       onSelect: (asset) => openAsset(asset, wide),
                       onMove: moveAsset,
                       onAdd: widget.editing && !editingMap
@@ -224,6 +473,12 @@ class _RoomPageState extends State<RoomPage> {
                     ),
                   ),
                 ),
+                if (editingMap)
+                  Positioned(
+                    left: 12,
+                    top: 12,
+                    child: _AddZoneBar(onAdd: addItem),
+                  ),
                 Positioned(
                   left: 12,
                   right: 12,
@@ -234,29 +489,35 @@ class _RoomPageState extends State<RoomPage> {
                       Expanded(
                         child: Align(
                           alignment: Alignment.bottomLeft,
-                          child: editingMap && detail != null
-                              ? _PositionControls(
-                                  asset: detail, onMove: moveAsset)
-                              : !short && !editingMap && assets.isNotEmpty
-                                  ? _Floating(
-                                      child: Padding(
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 12, vertical: 9),
-                                        child: Wrap(
-                                            spacing: 14,
-                                            runSpacing: 6,
-                                            children: [
-                                              for (final status
-                                                  in statusesBySeverity)
-                                                if (widget.room.count(status) >
-                                                    0)
-                                                  StatusTag(status,
-                                                      count: widget.room
-                                                          .count(status)),
-                                            ]),
-                                      ),
-                                    )
-                                  : const SizedBox.shrink(),
+                          child: editingMap && selectedItem != null
+                              ? _ItemControls(
+                                  item: selectedItem!,
+                                  onEdit: () => editItem(selectedItem!),
+                                  onDelete: () => deleteItem(selectedItem!))
+                              : editingMap && detail != null
+                                  ? _PositionControls(
+                                      asset: detail, onMove: moveAsset)
+                                  : !short && !editingMap && assets.isNotEmpty
+                                      ? _Floating(
+                                          child: Padding(
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 12, vertical: 9),
+                                            child: Wrap(
+                                                spacing: 14,
+                                                runSpacing: 6,
+                                                children: [
+                                                  for (final status
+                                                      in statusesBySeverity)
+                                                    if (widget.room
+                                                            .count(status) >
+                                                        0)
+                                                      StatusTag(status,
+                                                          count: widget.room
+                                                              .count(status)),
+                                                ]),
+                                          ),
+                                        )
+                                      : const SizedBox.shrink(),
                         ),
                       ),
                       // While positioning, the arrows own this strip.
@@ -451,12 +712,164 @@ class _Floating extends StatelessWidget {
       );
 }
 
+/// A drawn zone (table, row or rack) on the plan. Visual only unless editing,
+/// where it can be selected, dragged and resized.
+class _ZoneBox extends StatelessWidget {
+  const _ZoneBox({
+    required this.item,
+    required this.editing,
+    required this.selected,
+    required this.onTap,
+    required this.onMove,
+    required this.onResize,
+  });
+
+  final RoomItem item;
+  final bool editing;
+  final bool selected;
+  final VoidCallback onTap;
+  final ValueChanged<Offset> onMove;
+  final ValueChanged<Offset> onResize;
+
+  @override
+  Widget build(BuildContext context) {
+    final label = item.label.isEmpty ? item.kind.label : item.label;
+    final visual = DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0x14172721),
+        border: Border.all(
+            color: selected ? ink : hairlineStrong, width: selected ? 1.5 : 1),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Align(
+        alignment: Alignment.topLeft,
+        child: Padding(
+          padding: const EdgeInsets.all(6),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(item.kind.icon, size: 14, color: inkFaint),
+            const SizedBox(width: 4),
+            Flexible(
+              child: Text(label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w500,
+                      color: inkSoft)),
+            ),
+          ]),
+        ),
+      ),
+    );
+
+    if (!editing) return IgnorePointer(child: visual);
+
+    return MouseRegion(
+      cursor: SystemMouseCursors.grab,
+      child: GestureDetector(
+        onTap: onTap,
+        onPanUpdate: (event) => onMove(event.delta),
+        child: Stack(children: [
+          Positioned.fill(child: visual),
+          if (selected)
+            Positioned(
+              right: 0,
+              bottom: 0,
+              child: MouseRegion(
+                cursor: SystemMouseCursors.resizeDownRight,
+                child: GestureDetector(
+                  onPanUpdate: (event) => onResize(event.delta),
+                  child: Container(
+                    width: 20,
+                    height: 20,
+                    decoration: const BoxDecoration(
+                      color: ink,
+                      borderRadius:
+                          BorderRadius.only(topLeft: Radius.circular(6)),
+                    ),
+                    child: const Icon(Icons.open_in_full_rounded,
+                        size: 12, color: sheet),
+                  ),
+                ),
+              ),
+            ),
+        ]),
+      ),
+    );
+  }
+}
+
+/// Edit-mode control to drop a new zone onto the plan.
+class _AddZoneBar extends StatelessWidget {
+  const _AddZoneBar({required this.onAdd});
+  final ValueChanged<RoomItemKind> onAdd;
+
+  @override
+  Widget build(BuildContext context) => _Floating(
+        child: Padding(
+          padding: const EdgeInsets.only(left: 10, right: 2),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Text('Agregar zona',
+                style: Theme.of(context)
+                    .textTheme
+                    .labelMedium
+                    ?.copyWith(color: inkSoft)),
+            for (final kind in RoomItemKind.values)
+              IconButton(
+                tooltip: kind.label,
+                onPressed: () => onAdd(kind),
+                icon: Icon(kind.icon, size: 18),
+              ),
+          ]),
+        ),
+      );
+}
+
+/// Bottom-strip controls for the selected zone.
+class _ItemControls extends StatelessWidget {
+  const _ItemControls(
+      {required this.item, required this.onEdit, required this.onDelete});
+  final RoomItem item;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) => _Floating(
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Padding(
+            padding: const EdgeInsets.only(left: 12, right: 4),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Icon(item.kind.icon, size: 16, color: inkSoft),
+              const SizedBox(width: 6),
+              Text(item.label.isEmpty ? item.kind.label : item.label,
+                  style: const TextStyle(
+                      fontSize: 13, fontWeight: FontWeight.w500, color: ink)),
+            ]),
+          ),
+          IconButton(
+              tooltip: 'Editar zona',
+              onPressed: onEdit,
+              icon: const Icon(Icons.edit_outlined, size: 18)),
+          IconButton(
+              tooltip: 'Eliminar zona',
+              onPressed: onDelete,
+              icon: const Icon(Icons.delete_outline_rounded, size: 18)),
+        ]),
+      );
+}
+
 class _RoomCanvas extends StatelessWidget {
   const _RoomCanvas({
     required this.assets,
     required this.draft,
     required this.selected,
     required this.controller,
+    required this.items,
+    required this.editingItems,
+    required this.selectedItem,
+    required this.onSelectItem,
+    required this.onMoveItem,
+    required this.onResizeItem,
     required this.onSelect,
     required this.onMove,
     required this.onAdd,
@@ -466,6 +879,12 @@ class _RoomCanvas extends StatelessWidget {
   final Map<Asset, Offset>? draft;
   final Asset? selected;
   final TransformationController controller;
+  final List<RoomItem> items;
+  final bool editingItems;
+  final RoomItem? selectedItem;
+  final ValueChanged<RoomItem?> onSelectItem;
+  final void Function(RoomItem, Offset) onMoveItem;
+  final void Function(RoomItem, Offset) onResizeItem;
   final ValueChanged<Asset> onSelect;
   final void Function(Asset, Offset) onMove;
   final VoidCallback? onAdd;
@@ -496,8 +915,8 @@ class _RoomCanvas extends StatelessWidget {
           child: InteractiveViewer(
             transformationController: controller,
             minScale: 1,
-            maxScale: 3,
-            boundaryMargin: const EdgeInsets.all(24),
+            maxScale: 5,
+            boundaryMargin: const EdgeInsets.all(400),
             child: SizedBox(
               width: width,
               height: height,
@@ -508,6 +927,24 @@ class _RoomCanvas extends StatelessWidget {
                         painter: _PlanPaper(editing: draft != null)),
                   ),
                 ),
+                // Zones sit behind the markers.
+                for (final item in items)
+                  Positioned(
+                    left: item.rect.left * width,
+                    top: item.rect.top * height,
+                    width: item.rect.width * width,
+                    height: item.rect.height * height,
+                    child: _ZoneBox(
+                      item: item,
+                      editing: editingItems,
+                      selected: selectedItem == item,
+                      onTap: () => onSelectItem(item),
+                      onMove: (delta) => onMoveItem(
+                          item, Offset(delta.dx / width, delta.dy / height)),
+                      onResize: (delta) => onResizeItem(
+                          item, Offset(delta.dx / width, delta.dy / height)),
+                    ),
+                  ),
                 if (assets.isEmpty)
                   Center(
                     child: Column(

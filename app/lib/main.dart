@@ -9,7 +9,8 @@ import 'inventory_repository.dart';
 import 'inventory_theme.dart';
 import 'room_page.dart';
 
-export 'inventory_data.dart' show Asset, AssetStatus, DeviceIcon, Room;
+export 'inventory_data.dart'
+    show Asset, AssetStatus, DeviceIcon, Room, RoomItem, RoomItemKind;
 export 'inventory_repository.dart'
     show InventoryRepository, DemoInventoryRepository, HttpInventoryRepository;
 export 'room_page.dart' show Marker, RoomPage;
