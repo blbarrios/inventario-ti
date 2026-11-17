@@ -85,7 +85,21 @@ export async function configureAuth(app: FastifyInstance, pool: Pool, localDevel
       await client.query('SELECT pg_advisory_xact_lock(7911, hashtext($1))', [username]);
       const result = await client.query('SELECT * FROM auth_users WHERE username = $1', [username]);
       user = result.rows[0];
-      const valid = await verifyPassword(request.body.password, user?.password_hash ?? dummy);
+      let valid: boolean;
+      if (user?.password_hash.startsWith('$2a$')) {
+        // Accounts created in pgAdmin use pgcrypto bcrypt (at most 72 bytes).
+        if (Buffer.byteLength(request.body.password, 'utf8') > 72) {
+          valid = false;
+        } else {
+          const check = await client.query(
+            'SELECT public.crypt($1, $2) = $2 AS valid',
+            [request.body.password, user.password_hash],
+          );
+          valid = check.rows[0].valid;
+        }
+      } else {
+        valid = await verifyPassword(request.body.password, user?.password_hash ?? dummy);
+      }
       if (!valid || !user?.active) {
         await client.query('ROLLBACK');
         return reply.code(401).send({ error: 'Usuario o contraseña incorrectos' });

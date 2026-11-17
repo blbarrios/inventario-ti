@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { fileURLToPath } from 'node:url';
@@ -227,4 +228,34 @@ test('Autenticación de TI protege datos, persiste sesiones y registra al operad
     if (attempt.status === 429) { limited = true; break; }
   }
   assert.equal(limited, true, 'El login debe limitar intentos repetidos');
+});
+
+test('Una cuenta creada en pgAdmin permite ingresar y revoca sesiones al cambiar la clave', async (t) => {
+  const pool = new Pool({ connectionString: process.env.TEST_DATABASE_URL });
+  const username = 'sql-' + randomUUID();
+  const password = 'p'.repeat(72);
+  const template = readFileSync(new URL('../sql/cuenta-ti.sql', import.meta.url), 'utf8');
+  const accountSql = (secret) => template
+    .replace("'tecnico'", () => "'" + username + "'")
+    .replace("'CAMBIAR_POR_UNA_CLAVE_PERSONAL'", () => "'" + secret + "'");
+  t.after(async () => {
+    await pool.query('DELETE FROM auth_users WHERE username = $1', [username]);
+    await pool.end();
+  });
+  await pool.query(accountSql(password));
+  const address = await startApi(t, process.env.TEST_APPLICATION_DATABASE_URL ?? process.env.TEST_DATABASE_URL, false);
+  const login = (secret) => fetch(address + '/api/auth/login', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-inventory-request': '1' },
+    body: JSON.stringify({ username, password: secret, desktop: true }),
+  });
+  assert.equal((await login('incorrecta')).status, 401);
+  assert.equal((await login(password + 'otro')).status, 401);
+  const first = await login(password);
+  assert.equal(first.status, 200);
+  const token = (await first.json()).token;
+  await pool.query(accountSql('Nueva clave de prueba 2026!'));
+  assert.equal((await fetch(address + '/api/rooms', { headers: { authorization: 'Bearer ' + token } })).status, 401);
+  assert.equal((await login(password)).status, 401);
+  assert.equal((await login('Nueva clave de prueba 2026!')).status, 200);
 });

@@ -1,6 +1,6 @@
 # Despliegue del MVP en Dokploy
 
-La aplicación usa cuentas locales de TI. Todas las cuentas habilitadas pueden consultar y editar el inventario. El alta, el restablecimiento de contraseña y la desactivación se hacen desde la consola del servidor. Cada sesión dura 12 horas. El historial de estados registra el nombre de usuario.
+La aplicación usa cuentas locales de TI. Todas las cuentas habilitadas pueden consultar y editar el inventario. El alta y el restablecimiento de contraseña se pueden hacer desde pgAdmin o la consola del servidor. Cada sesión dura 12 horas. El historial de estados registra el nombre de usuario.
 
 ## Configurar la aplicación
 
@@ -23,7 +23,7 @@ El Dockerfile compila Flutter con `USE_API=true`. Así, web consulta `/api` desd
 Desde la consola del contenedor de la aplicación, en `/app`, ejecutar lo siguiente con una conexión que pueda crear y modificar tablas en la base.
 
 ```sh
-npm run migrate
+npm --prefix /app run migrate
 ```
 
 Esto aplica las migraciones pendientes, incluida `003_auth`, que crea `auth_users` y `auth_sessions`. Ejecutar el comando de nuevo informa que no hay migraciones pendientes.
@@ -42,6 +42,14 @@ GRANT SELECT ON public.auth_users TO inventory_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.auth_sessions TO inventory_app;
 ```
 
+## Crear o restablecer una cuenta desde pgAdmin
+
+Después de aplicar las migraciones y desplegar la versión que admite pgcrypto, abrir Query Tool sobre la base del inventario con la cuenta administrativa.
+
+Abrir [api/sql/cuenta-ti.sql](api/sql/cuenta-ti.sql), cambiar los valores de account_username, account_name y account_password y ejecutar su contenido. El bloque crea la cuenta o actualiza su contraseña, la habilita y revoca sus sesiones anteriores. Usa bcrypt de pgcrypto y valida la longitud de la clave antes de guardarla. La API también admite los hashes scrypt creados desde la consola.
+
+La contraseña debe tener al menos 12 caracteres y ocupar hasta 72 bytes en UTF-8. Después del cambio se ingresa con ese usuario y esa contraseña desde el formulario de la aplicación. El script SQL contiene una contraseña de ejemplo que obliga a reemplazarla antes de ejecutarlo.
+
 ## Crear la primera cuenta de TI
 
 Ejecutar en la consola del contenedor con la conexión propietaria o administrativa en `DATABASE_URL`. La cuenta de PostgreSQL usada para administrar usuarios debe poder escribir en `auth_users` y revocar registros de `auth_sessions`.
@@ -55,7 +63,7 @@ read -r TI_PASSWORD
 stty echo
 printf "\n"
 export TI_PASSWORD
-npm run user:set
+npm --prefix /app run user:set
 unset TI_PASSWORD
 ```
 
@@ -66,7 +74,7 @@ Repetir `user:set` con un usuario existente cambia su contraseña y nombre visib
 Para deshabilitar una cuenta y revocar sus sesiones, ejecutar lo siguiente.
 
 ```sh
-TI_USERNAME=tecnico npm run user:disable
+TI_USERNAME=tecnico npm --prefix /app run user:disable
 ```
 
 ## Comprobar el acceso
