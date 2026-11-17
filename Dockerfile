@@ -9,7 +9,7 @@ RUN flutter build web --release --no-pub --dart-define=USE_API=true
 FROM node:24-alpine AS api_builder
 WORKDIR /workspace/api
 COPY api/package*.json ./
-RUN npm install
+RUN npm ci
 COPY api/ ./
 RUN npm run build
 

@@ -1,5 +1,7 @@
 # Inventario TI por espacios
 
+El acceso de TI y los pasos del MVP para Dokploy están documentados en [DESPLIEGUE.md](DESPLIEGUE.md).
+
 Este documento reúne el alcance, las decisiones técnicas y el orden de ejecución para retomar el proyecto. Última actualización: 17 de noviembre de 2026. Etapa actual: primera base funcional en desarrollo local.
 
 ## Alcance acordado
@@ -27,7 +29,7 @@ El [inventario de red](../mapa-red-actual.md) sirve como referencia inicial. Ant
 | Backend | Node.js LTS, TypeScript y Fastify. API REST con JSON Schema para validar cuerpos y respuestas. |
 | Persistencia | PostgreSQL existente. Propuesta de base dedicada en la misma instancia, con rol de aplicación de permisos limitados y credenciales de migración separadas. Usar `pg` para consultas parametrizadas y transacciones, y `node-pg-migrate` para versionar el esquema. |
 | Sincronización | Server-Sent Events (SSE) del backend al navegador. PostgreSQL emite avisos con `LISTEN` y `NOTIFY`. |
-| Acceso | Sesión web autenticada con cookie `HttpOnly`, `Secure` y `SameSite=Lax` en producción. Validar la sesión y el acceso de TI en las rutas de consulta, escritura y eventos. Validar el origen de las solicitudes de escritura. Proveedor de identidad pendiente. |
+| Acceso | Sesión web autenticada con cookie `HttpOnly`, `Secure` y `SameSite=Lax` en producción. Validar la sesión y el acceso de TI en las rutas de consulta, escritura y eventos. Validar el origen de las solicitudes de escritura. Cuentas locales de TI y gestión por consola para el MVP. |
 | Hosting | Una aplicación de Dokploy en el VPS existente, con build por Dockerfile y un dominio HTTPS en Traefik. Fastify sirve el bundle de Flutter Web y `/api` en el mismo origen. PostgreSQL sigue en su servicio actual y la API se conecta por red privada. |
 
 Referencias: [despliegue Flutter Web](https://docs.flutter.dev/deployment/web), [InteractiveViewer](https://api.flutter.dev/flutter/widgets/InteractiveViewer-class.html), [validación Fastify](https://fastify.dev/docs/latest/Reference/Validation-and-Serialization/), [transacciones en `pg`](https://node-postgres.com/features/transactions) y [migraciones](https://github.com/salsita/node-pg-migrate).
@@ -120,7 +122,7 @@ GRANT SELECT, INSERT ON public.asset_status_history TO inventory_app;
 GRANT USAGE ON SEQUENCE public.asset_status_history_id_seq TO inventory_app;
 ```
 
-La variable `DATABASE_URL` de ejecución de la API en Dokploy usa `inventory_app` y el hostname interno del servicio PostgreSQL. La creación de la base y sus tablas prepara el almacenamiento. La conexión desde Flutter y el inicio de sesión de TI siguen pendientes.
+La variable `DATABASE_URL` de ejecución de la API en Dokploy usa `inventory_app` y el hostname interno del servicio PostgreSQL. La creación de la base y sus tablas prepara el almacenamiento. Flutter consulta la API cuando se compila con USE_API=true. El acceso de TI usa sesiones de PostgreSQL.
 
 ### Base existente confirmada
 
@@ -128,7 +130,7 @@ La base de destino confirmada por TI se llama `inventory-app`. La contraseña se
 
 Usar los comandos de creación anteriores solo al preparar una instancia nueva. Para esta base existente, ejecutar las migraciones con una cuenta que pueda crear tablas y usar en la API un rol con los permisos de inventario documentados arriba. En Dokploy, obtener el hostname y puerto internos del servicio PostgreSQL y configurar `DATABASE_URL` con la base `inventory-app`.
 
-Las rutas de alta de equipos, cambio de estado con historial y guardado de plano ya están implementadas para desarrollo local. Para probarlas, configurar `INVENTORY_LOCAL_DEV=true` y `HOST=127.0.0.1` al arrancar la API. El modo local identifica los registros de prueba como `desarrollo-local`. En Dokploy, mantener `INVENTORY_LOCAL_DEV=false` hasta incorporar el inicio de sesión de TI. En ese estado las rutas de inventario devuelven un error 503 que informa que el acceso está pendiente de configurar.
+Las rutas de inventario requieren una cuenta de TI. El modo INVENTORY_LOCAL_DEV=true se conserva para pruebas de loopback y queda bloqueado en producción. Consultar DESPLIEGUE.md para aplicar las migraciones, crear cuentas y configurar las sesiones.
 
 El 17 de noviembre de 2026 las dos pruebas HTTP pasaron contra una base desechable llamada `inventory-app` con PostgreSQL 17. Se verificaron alta de equipo, código duplicado, dos cambios simultáneos con conflicto de versión, historial sin duplicados y guardado del plano con control de pertenencia a la sala. Otra instancia de la API pudo consultar los datos guardados. La prueba de escritura utilizó el rol limitado `inventory_app` con los permisos documentados. La instancia del VPS sigue pendiente de configuración y verificación.
 
@@ -151,7 +153,7 @@ Las skills oficiales están identificadas para la fase de implementación. Los a
 
 ## Pendientes de confirmar
 
-- Si la organización tiene un proveedor de inicio de sesión para TI, como Microsoft Entra ID o Google Workspace. Si dispone de uno, comprobar la integración OIDC y la forma de asignar el acceso al personal de TI. En caso contrario, definir el alta y la recuperación de cuentas internas.
+- Crear las cuentas locales de TI siguiendo DESPLIEGUE.md. El restablecimiento de contraseña se realiza desde la consola con user:set.
 - Confirmar la versión de PostgreSQL y el alcance al hostname interno desde el contenedor de la API durante la preparación del despliegue. Confirmar el subdominio y si el acceso de TI será desde internet, por VPN o solo por la red interna.
 - Inventario inicial de las tres salas y nombres definitivos de los estados. El editor permite que TI levante las ubicaciones directamente en la app.
 
@@ -196,5 +198,4 @@ El 17 de noviembre de 2026 pasaron las cuatro pruebas de Flutter y la prueba HTT
 
 Tras actualizar `@fastify/static`, `npm audit --omit=dev` reportó cero vulnerabilidades en las dependencias de ejecución. La auditoría completa sigue reportando tres avisos moderados en dependencias de desarrollo. El Dockerfile actual copia esas dependencias a la imagen.
 
-**Estado de ejecución.** El prototipo y la API compilan. La API permite guardar equipos, estados e historial y distribución, con pruebas locales sobre PostgreSQL. Flutter todavía guarda en memoria. Quedan por implementar la conexión desde Flutter, el acceso de TI, el editor de figuras y la sincronización. Registrar aquí los avances y los comandos verificados. Mantener los valores de credenciales fuera del repositorio.
-
+**Estado de ejecución.** Flutter puede consultar la API y guardar el inventario. El MVP incluye acceso de TI con sesiones de 12 horas, gestión de cuentas por consola y usuario en el historial. El despliegue y la comprobación en el VPS quedan a cargo de TI. La sincronización automática sigue pendiente.

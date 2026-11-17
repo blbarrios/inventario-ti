@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'forms.dart';
+import 'auth_gate.dart';
+import 'auth_session.dart';
 import 'inventory_data.dart';
 import 'inventory_repository.dart';
 import 'inventory_theme.dart';
@@ -14,27 +16,52 @@ export 'room_page.dart' show Marker, RoomPage;
 
 void main() => runApp(const InventoryApp());
 
-class InventoryApp extends StatelessWidget {
+class InventoryApp extends StatefulWidget {
   const InventoryApp({super.key, this.repository});
-
-  /// Injected in tests; the app picks one from build flags when null.
   final InventoryRepository? repository;
 
   @override
+  State<InventoryApp> createState() => _InventoryAppState();
+}
+
+class _InventoryAppState extends State<InventoryApp> {
+  final navigator = GlobalKey<NavigatorState>();
+  late final InventoryRepository initialRepository =
+      widget.repository ?? defaultRepository();
+  late final AuthSession? session = initialRepository is HttpInventoryRepository
+      ? AuthSession(base: (initialRepository as HttpInventoryRepository).base)
+      : null;
+
+  @override
+  void dispose() {
+    session?.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) => MaterialApp(
+        navigatorKey: navigator,
         title: 'Inventario TI',
         debugShowCheckedModeBanner: false,
         locale: const Locale('es', 'CO'),
         supportedLocales: const [Locale('es', 'CO')],
         localizationsDelegates: GlobalMaterialLocalizations.delegates,
         theme: inventoryTheme(),
-        home: HomePage(repository: repository),
+        home: session == null
+            ? HomePage(repository: initialRepository)
+            : AuthGate(
+                session: session!,
+                navigatorKey: navigator,
+                homeBuilder: (repository, logout) =>
+                    HomePage(repository: repository, onLogout: logout),
+              ),
       );
 }
 
 class HomePage extends StatefulWidget {
-  const HomePage({super.key, this.repository});
+  const HomePage({super.key, this.repository, this.onLogout});
   final InventoryRepository? repository;
+  final VoidCallback? onLogout;
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -103,6 +130,7 @@ class _HomePageState extends State<HomePage> {
         child: Column(children: [
           _TopBar(
             presenting: presenting,
+            onLogout: widget.onLogout,
             onModeChanged: (value) => setState(() => presenting = value),
           ),
           Expanded(child: _body()),
@@ -222,7 +250,9 @@ class _ErrorState extends StatelessWidget {
 }
 
 class _TopBar extends StatelessWidget {
-  const _TopBar({required this.presenting, required this.onModeChanged});
+  const _TopBar(
+      {required this.presenting, required this.onModeChanged, this.onLogout});
+  final VoidCallback? onLogout;
   final bool presenting;
   final ValueChanged<bool> onModeChanged;
 
@@ -259,6 +289,11 @@ class _TopBar extends StatelessWidget {
                   ),
                 ),
               ),
+              if (onLogout != null)
+                IconButton(
+                    tooltip: 'Cerrar sesión',
+                    onPressed: onLogout,
+                    icon: const Icon(Icons.logout)),
             ]),
           ),
         ),

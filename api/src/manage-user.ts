@@ -16,6 +16,7 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL, connectionTi
 const client = await pool.connect();
 try {
   await client.query('BEGIN');
+  await client.query('SELECT pg_advisory_xact_lock(7911, hashtext($1))', [username]);
   if (disable) {
     const result = await client.query('UPDATE auth_users SET active = false WHERE username = $1 RETURNING id', [username]);
     if (!result.rowCount) throw new Error('El usuario no existe');

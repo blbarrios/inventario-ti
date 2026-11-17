@@ -76,17 +76,32 @@ export async function configureAuth(app: FastifyInstance, pool: Pool, localDevel
   }, async (request, reply) => {
     reply.header('Cache-Control', 'no-store');
     const username = request.body.username.trim().toLowerCase();
-    const { rows: [user] } = await pool.query('SELECT * FROM auth_users WHERE username = $1', [username]);
-    const valid = await verifyPassword(request.body.password, user?.password_hash ?? dummy);
-    if (!valid || !user?.active) {
-      return reply.code(401).send({ error: 'Usuario o contraseña incorrectos' });
-    }
+    const client = await pool.connect();
+    let user;
     const raw = randomBytes(32).toString('hex');
-    await pool.query('DELETE FROM auth_sessions WHERE expires_at <= now()');
-    await pool.query(`
-      INSERT INTO auth_sessions (token_hash, user_id, expires_at)
-      VALUES ($1, $2, now() + interval '12 hours')
-    `, [tokenHash(raw), user.id]);
+    try {
+      await client.query('BEGIN');
+      // Coordinate login with password resets and account deactivation.
+      await client.query('SELECT pg_advisory_xact_lock(7911, hashtext($1))', [username]);
+      const result = await client.query('SELECT * FROM auth_users WHERE username = $1', [username]);
+      user = result.rows[0];
+      const valid = await verifyPassword(request.body.password, user?.password_hash ?? dummy);
+      if (!valid || !user?.active) {
+        await client.query('ROLLBACK');
+        return reply.code(401).send({ error: 'Usuario o contraseña incorrectos' });
+      }
+      await client.query('DELETE FROM auth_sessions WHERE expires_at <= now()');
+      await client.query(
+        "INSERT INTO auth_sessions (token_hash, user_id, expires_at) VALUES ($1, $2, now() + interval '12 hours')",
+        [tokenHash(raw), user.id],
+      );
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
     // Windows keeps this token in memory. Browser sessions use an HttpOnly cookie.
     if (!request.body.desktop) reply.setCookie(cookieName, raw, { ...cookieOptions, maxAge: lifetimeSeconds });
     return {
