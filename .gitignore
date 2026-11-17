@@ -1,0 +1,14 @@
+# Skills instaladas para los agentes
+/.claude/skills/
+
+# Dependencias y resultados de compilación
+**/node_modules/
+**/.npm-cache/
+**/.dart_tool/
+**/build/
+**/dist/
+
+# Configuración local
+**/.env
+**/.env.*
+!**/.env.example

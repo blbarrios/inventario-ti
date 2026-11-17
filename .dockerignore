@@ -1,0 +1,9 @@
+.git
+**/node_modules
+**/.npm-cache
+**/.dart_tool
+**/windows/flutter/ephemeral
+**/.idea
+**/build
+**/.env
+.claude
