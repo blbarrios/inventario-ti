@@ -1,7 +1,12 @@
-import 'inventory_data.dart';
+import 'dart:convert';
 
+import 'inventory_data.dart';
 // Web picks/downloads via dart:html; elsewhere (tests) these are no-ops.
-export 'web_files_stub.dart' if (dart.library.html) 'web_files_web.dart';
+import 'web_files_stub.dart' if (dart.library.html) 'web_files_web.dart'
+    as files;
+
+export 'web_files_stub.dart' if (dart.library.html) 'web_files_web.dart'
+    show downloadCsv;
 
 /// One parsed, validated row ready to create as an asset.
 class CsvAsset {
@@ -34,8 +39,10 @@ class CsvParseResult {
 }
 
 /// The downloadable template, with one example row.
-String assetsCsvTemplate() => 'codigo,nombre,tipo,icono,responsable,estado\r\n'
-    'SW-R1-03,Switch de acceso,Switch,switch,Soporte TI,operational\r\n';
+// Uses `;` because that is what Excel in Spanish expects (imports accept `;`,
+// `,` or tab).
+String assetsCsvTemplate() => 'codigo;nombre;tipo;icono;responsable;estado\r\n'
+    'SW-R1-03;Switch de acceso;Switch;switch;Soporte TI;operational\r\n';
 
 String _norm(String value) {
   var v = value.trim().toLowerCase();
@@ -64,7 +71,9 @@ AssetStatus? _statusFromText(String value) {
 /// `codigo`, `nombre` and `tipo` are required; `icono`, `responsable` and
 /// `estado` are optional.
 CsvParseResult parseAssetsCsv(String content) {
-  final rows = _splitCsv(content)
+  // Excel adds a BOM to UTF-8 files; drop it so the first header matches.
+  if (content.startsWith('﻿')) content = content.substring(1);
+  final rows = _splitCsv(content, _detectDelimiter(content))
       .where((row) => row.any((cell) => cell.trim().isNotEmpty))
       .toList();
   if (rows.isEmpty) {
@@ -86,14 +95,31 @@ CsvParseResult parseAssetsCsv(String content) {
     ]);
   }
 
+  String cell(List<String> row, int i) =>
+      (i >= 0 && i < row.length) ? row[i].trim() : '';
+
+  // A code used on more than one row is ambiguous: reject every such row so
+  // nothing half-right gets in (common when a missing serial is typed as 0).
+  final codeCount = <String, int>{};
+  for (final row in rows.skip(1)) {
+    final code = cell(row, ci).toLowerCase();
+    if (code.isNotEmpty) codeCount[code] = (codeCount[code] ?? 0) + 1;
+  }
+
   final assets = <CsvAsset>[];
   final errors = <CsvRowError>[];
   for (var r = 1; r < rows.length; r++) {
     final row = rows[r];
-    String at(int i) => (i >= 0 && i < row.length) ? row[i].trim() : '';
+    String at(int i) => cell(row, i);
     final code = at(ci), name = at(ni), type = at(ti);
     if (code.isEmpty || name.isEmpty || type.isEmpty) {
       errors.add(CsvRowError(r + 1, 'Código, nombre y tipo son obligatorios.'));
+      continue;
+    }
+    final repeats = codeCount[code.toLowerCase()] ?? 0;
+    if (repeats > 1) {
+      errors.add(CsvRowError(r + 1,
+          '$name: el código «$code» se repite en $repeats filas. Usa un código único (p. ej. el serial).'));
       continue;
     }
     final iconText = at(ii);
@@ -114,8 +140,39 @@ CsvParseResult parseAssetsCsv(String content) {
   return CsvParseResult(assets, errors);
 }
 
+/// Excel in Spanish saves with `;`; others use `,` or tab. Pick whichever
+/// appears most in the header line (outside quotes).
+String _detectDelimiter(String content) {
+  final header = content
+      .split(RegExp(r'\r?\n|\r'))
+      .firstWhere((line) => line.trim().isNotEmpty, orElse: () => '');
+  final counts = {',': 0, ';': 0, '\t': 0};
+  var inQuotes = false;
+  for (final c in header.split('')) {
+    if (c == '"') inQuotes = !inQuotes;
+    if (!inQuotes && counts.containsKey(c)) counts[c] = counts[c]! + 1;
+  }
+  return counts.entries.reduce((a, b) => b.value > a.value ? b : a).key;
+}
+
+/// Turn file bytes into text: UTF-8 when valid, else Windows-1252/Latin-1
+/// (what Excel on Windows usually saves as "CSV").
+String decodeCsvBytes(List<int> bytes) {
+  try {
+    return utf8.decode(bytes);
+  } on FormatException {
+    return latin1.decode(bytes);
+  }
+}
+
+/// Opens the file chooser and returns the chosen CSV as text.
+Future<String?> pickCsvFile() async {
+  final bytes = await files.pickCsvBytes();
+  return bytes == null ? null : decodeCsvBytes(bytes);
+}
+
 /// A small CSV reader that understands quoted fields and escaped quotes.
-List<List<String>> _splitCsv(String input) {
+List<List<String>> _splitCsv(String input, String delimiter) {
   final normalized = input.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
   final rows = <List<String>>[];
   var row = <String>[];
@@ -136,7 +193,7 @@ List<List<String>> _splitCsv(String input) {
       }
     } else if (c == '"') {
       inQuotes = true;
-    } else if (c == ',') {
+    } else if (c == delimiter) {
       row.add(field.toString());
       field = StringBuffer();
     } else if (c == '\n') {

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:inventario_ti/csv_import.dart';
 import 'package:inventario_ti/inventory_data.dart';
@@ -53,6 +55,37 @@ void main() {
         'SRV-1,"Servidor, principal",Servidor\n';
     final result = parseAssetsCsv(csv);
     expect(result.assets.single.name, 'Servidor, principal');
+  });
+
+  test('Excel (Spanish): semicolons, Windows-1252, repeated "0" codes', () {
+    // Same shape as an Excel "CSV" saved on Windows in Spanish.
+    final bytes = latin1.encode(
+        'codigo;nombre;tipo;icono;responsable;estado\r\n'
+        '5CD6504JPJ;PRESTAMO1;Portátil;laptop;ANDREA PEREZ;operational\r\n'
+        '0;PRESTAMO5;Portátil;laptop;BLADIMIR B.;operational\r\n'
+        '0;PRESTAMO6;Portátil;laptop;ADRIANA OLAYA;operational\r\n'
+        '5CD6504JNL;PRESTAMO11;Portátil;laptop;JULIAN GARZÓN;operational\r\n');
+    final result = parseAssetsCsv(decodeCsvBytes(bytes));
+
+    expect(result.assets.map((a) => a.code), ['5CD6504JPJ', '5CD6504JNL']);
+    expect(result.assets.first.type, 'Portátil');
+    expect(result.assets.first.icon, DeviceIcon.laptop);
+    expect(result.assets.last.responsible, 'JULIAN GARZÓN');
+    // Both rows sharing code "0" are rejected, with a clear reason.
+    expect(result.errors, hasLength(2));
+    expect(result.errors.first.message, contains('se repite'));
+  });
+
+  test('UTF-8 with BOM keeps the first header usable', () {
+    final bytes = [
+      0xEF,
+      0xBB,
+      0xBF,
+      ...utf8.encode('codigo,nombre,tipo\nAP-1,Punto,Punto de acceso\n'),
+    ];
+    final result = parseAssetsCsv(decodeCsvBytes(bytes));
+    expect(result.errors, isEmpty);
+    expect(result.assets.single.code, 'AP-1');
   });
 
   test('template parses back cleanly', () {
