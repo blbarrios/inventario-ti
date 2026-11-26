@@ -10,10 +10,14 @@ import 'inventory_repository.dart';
 import 'inventory_theme.dart';
 
 /// The plan is this many times the viewport on each side, so assets and
-/// zones have room to spread out; zoom in to work on a part of it.
+/// zones have room to spread out. It opens on the whole plan; zoom in for
+/// full markers and drag the background to move around.
 const planScale = 2.0;
 const fitScale = 1 / planScale;
 const maxPlanScale = 5.0;
+
+/// Below this zoom, markers switch to compact name tags.
+const denseBelowScale = .75;
 // Scale z too: InteractiveViewer reads the current zoom with
 // getMaxScaleOnAxis(), so a z of 1 would make every zoom look like 1x and
 // let the plan shrink below "fit".
@@ -37,6 +41,7 @@ class RoomPage extends StatefulWidget {
 }
 
 class _RoomPageState extends State<RoomPage> {
+  // Opens on the whole plan (compact tags) so no asset starts off-screen.
   final transform = TransformationController(fitMatrix());
   final viewportKey = GlobalKey();
   final search = TextEditingController();
@@ -561,7 +566,7 @@ class _RoomPageState extends State<RoomPage> {
                                 onPressed: () => zoom(1.25),
                                 icon: const Icon(Icons.add_rounded, size: 18)),
                             IconButton(
-                                tooltip: 'Restablecer vista',
+                                tooltip: 'Ver plano completo',
                                 onPressed: () => transform.value = fitMatrix(),
                                 icon: const Icon(Icons.crop_free_rounded,
                                     size: 18)),
@@ -994,33 +999,59 @@ class _RoomCanvas extends StatelessWidget {
                       ],
                     ),
                   ),
-                for (final asset in assets)
-                  Positioned(
-                    left: left + (draft?[asset] ?? asset.position).dx * travelX,
-                    top: top + (draft?[asset] ?? asset.position).dy * travelY,
-                    width: markerWidth,
-                    height: markerHeight,
-                    child: MouseRegion(
-                      cursor: draft == null
-                          ? SystemMouseCursors.click
-                          : SystemMouseCursors.grab,
-                      child: GestureDetector(
-                        onPanUpdate: draft == null
-                            ? null
-                            : (event) => onMove(
-                                  asset,
-                                  Offset(event.delta.dx / travelX,
-                                      event.delta.dy / travelY),
+                // Markers keep the same size on screen at any zoom, so
+                // zooming in opens real space between them; zoomed out
+                // they turn into compact name tags.
+                AnimatedBuilder(
+                  animation: controller,
+                  builder: (context, _) {
+                    final scale = controller.value.getMaxScaleOnAxis();
+                    final dense = scale < denseBelowScale;
+                    final design = dense
+                        ? Size(markerWidth, 56)
+                        : Size(markerWidth, markerHeight);
+                    // Designed at 2x; shown at half size on screen.
+                    final onPlan = design * (.5 / scale);
+                    return Stack(children: [
+                      for (final asset in assets)
+                        Positioned(
+                          left: left +
+                              (draft?[asset] ?? asset.position).dx * travelX,
+                          top: top +
+                              (draft?[asset] ?? asset.position).dy * travelY,
+                          width: onPlan.width,
+                          height: onPlan.height,
+                          child: MouseRegion(
+                            cursor: draft == null
+                                ? SystemMouseCursors.click
+                                : SystemMouseCursors.grab,
+                            child: GestureDetector(
+                              onPanUpdate: draft == null
+                                  ? null
+                                  : (event) => onMove(
+                                        asset,
+                                        Offset(event.delta.dx / travelX,
+                                            event.delta.dy / travelY),
+                                      ),
+                              child: FittedBox(
+                                fit: BoxFit.fill,
+                                child: SizedBox.fromSize(
+                                  size: design,
+                                  child: Marker(
+                                    asset: asset,
+                                    selected: selected == asset,
+                                    onTap: () => onSelect(asset),
+                                    compact: compact,
+                                    dense: dense,
+                                  ),
                                 ),
-                        child: Marker(
-                          asset: asset,
-                          selected: selected == asset,
-                          onTap: () => onSelect(asset),
-                          compact: compact,
+                              ),
+                            ),
+                          ),
                         ),
-                      ),
-                    ),
-                  ),
+                    ]);
+                  },
+                ),
               ]),
             ),
           ),
@@ -1037,12 +1068,16 @@ class Marker extends StatelessWidget {
     required this.selected,
     required this.onTap,
     required this.compact,
+    this.dense = false,
   });
 
   final Asset asset;
   final bool selected;
   final VoidCallback onTap;
   final bool compact;
+
+  /// Overview tag: icon and name on one line.
+  final bool dense;
 
   @override
   Widget build(BuildContext context) {
@@ -1067,34 +1102,50 @@ class Marker extends StatelessWidget {
           onTap: onTap,
           child: Padding(
             padding: EdgeInsets.symmetric(horizontal: compact ? 8 : 10),
-            child: Row(children: [
-              DeviceGlyph(asset.icon, status, size: compact ? 30 : 36),
-              SizedBox(width: compact ? 7 : 10),
-              Expanded(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(asset.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                            fontSize: compact ? 22 : 24,
-                            fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 4),
-                    Text(asset.assignedLabel,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 22, color: inkFaint)),
-                  ],
-                ),
-              ),
-              if (asset.maintenancePending)
-                const Tooltip(
-                    message: 'Mantenimiento pendiente',
-                    child: Icon(Icons.build_outlined,
-                        size: 26, color: maintenanceInk)),
-            ]),
+            child: dense
+                ? Row(children: [
+                    DeviceGlyph(asset.icon, status, size: 30),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(asset.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontSize: 24, fontWeight: FontWeight.w600)),
+                    ),
+                    if (asset.maintenancePending)
+                      const Icon(Icons.build_outlined,
+                          size: 24, color: maintenanceInk),
+                  ])
+                : Row(children: [
+                    DeviceGlyph(asset.icon, status, size: compact ? 30 : 36),
+                    SizedBox(width: compact ? 7 : 10),
+                    Expanded(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(asset.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                  fontSize: compact ? 22 : 24,
+                                  fontWeight: FontWeight.w600)),
+                          const SizedBox(height: 4),
+                          Text(asset.assignedLabel,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                  fontSize: 22, color: inkFaint)),
+                        ],
+                      ),
+                    ),
+                    if (asset.maintenancePending)
+                      const Tooltip(
+                          message: 'Mantenimiento pendiente',
+                          child: Icon(Icons.build_outlined,
+                              size: 26, color: maintenanceInk)),
+                  ]),
           ),
         ),
       ),
