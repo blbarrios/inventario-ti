@@ -28,7 +28,7 @@ class AssetList extends StatelessWidget {
         final filtered = room.assets
             .where(
               (asset) =>
-                  '${asset.code} ${asset.name} ${asset.type} ${asset.status.label}'
+                  '${asset.code} ${asset.name} ${asset.type} ${asset.responsible} ${asset.status.label}'
                       .toLowerCase()
                       .contains(query),
             )
@@ -61,7 +61,7 @@ class AssetList extends StatelessWidget {
                 child: TextField(
                   controller: search,
                   decoration: InputDecoration(
-                    hintText: 'Buscar por nombre, código o estado',
+                    hintText: 'Buscar equipo, persona o estado',
                     prefixIcon: const Icon(Icons.search_rounded, size: 18),
                     suffixIcon: value.text.isEmpty
                         ? null
@@ -140,6 +140,11 @@ class _AssetRow extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           style: Theme.of(context).textTheme.titleSmall),
                       const SizedBox(height: 3),
+                      Text(asset.assignedLabel,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style:
+                              const TextStyle(fontSize: 12.5, color: inkFaint)),
                       Row(children: [
                         Text(asset.code,
                             style: monoStyle(size: 12, color: inkFaint)),
@@ -154,6 +159,10 @@ class _AssetRow extends StatelessWidget {
                                   color: asset.status.color)),
                         ),
                       ]),
+                      if (asset.maintenancePending) ...[
+                        const SizedBox(height: 4),
+                        const MaintenanceTag(),
+                      ],
                     ],
                   ),
                 ),
@@ -190,6 +199,7 @@ class _AssetDetailState extends State<AssetDetail> {
   final note = TextEditingController();
   late List<StatusChange> history = widget.asset.history;
   bool saving = false;
+  bool savingMaintenance = false;
 
   @override
   void initState() {
@@ -227,6 +237,23 @@ class _AssetDetailState extends State<AssetDetail> {
       messenger.showSnackBar(SnackBar(content: Text(e.message)));
     } finally {
       if (mounted) setState(() => saving = false);
+    }
+  }
+
+  Future<void> setMaintenance(bool value) async {
+    setState(() => savingMaintenance = true);
+    try {
+      await widget.repo.updateMaintenance(widget.asset, value);
+      if (!mounted) return;
+      setState(() {});
+      widget.onSaved();
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('$error')));
+      }
+    } finally {
+      if (mounted) setState(() => savingMaintenance = false);
     }
   }
 
@@ -326,6 +353,18 @@ class _AssetDetailState extends State<AssetDetail> {
             ],
             const SizedBox(height: 20),
             _CurrentStatus(asset.status),
+            const SizedBox(height: 12),
+            if (widget.editable)
+              SwitchListTile.adaptive(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Mantenimiento pendiente'),
+                subtitle:
+                    const Text('Marca el equipo cuando ya necesite atención.'),
+                value: asset.maintenancePending,
+                onChanged: saving || savingMaintenance ? null : setMaintenance,
+              )
+            else if (asset.maintenancePending)
+              const MaintenanceTag(),
             if (widget.editable) ...[
               const SizedBox(height: 28),
               Text('Ícono',
@@ -431,7 +470,8 @@ class _AssetDetailState extends State<AssetDetail> {
                 ),
                 const SizedBox(height: 10),
                 FilledButton(
-                  onPressed: unchanged || saving ? null : save,
+                  onPressed:
+                      unchanged || saving || savingMaintenance ? null : save,
                   child: const Text('Guardar estado'),
                 ),
               ]),

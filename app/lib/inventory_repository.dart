@@ -22,6 +22,8 @@ class ApiException implements Exception {
 /// memory, offline) and [HttpInventoryRepository] (the Fastify API).
 abstract class InventoryRepository {
   Future<List<Room>> loadRooms();
+  Future<List<Asset>> loadAssets();
+  Future<void> updateMaintenance(Asset asset, bool pending);
   Future<Room> createRoom(String name);
   Future<Asset> createAsset(
     Room room, {
@@ -68,6 +70,23 @@ class DemoInventoryRepository implements InventoryRepository {
   // edits (status, icon, positions) still flow back here.
   @override
   Future<List<Room>> loadRooms() async => List.of(_rooms);
+
+  @override
+  Future<List<Asset>> loadAssets() async {
+    final assets = <Asset>[];
+    for (final room in _rooms) {
+      for (final asset in room.assets) {
+        asset.roomName = room.name;
+        assets.add(asset);
+      }
+    }
+    return assets;
+  }
+
+  @override
+  Future<void> updateMaintenance(Asset asset, bool pending) async {
+    asset.maintenancePending = pending;
+  }
 
   @override
   Future<Room> createRoom(String name) async {
@@ -187,6 +206,29 @@ class HttpInventoryRepository implements InventoryRepository {
     for (final asset in room.assets) {
       if (!asset.hasPosition) asset.position = cascadePosition(index++);
     }
+  }
+
+  @override
+  Future<List<Asset>> loadAssets() async {
+    final res = await _get('/assets');
+    if (res.statusCode != 200) _fail(res);
+    return [
+      for (final row in jsonDecode(res.body) as List)
+        Asset.fromJson(row as Map<String, dynamic>),
+    ];
+  }
+
+  @override
+  Future<void> updateMaintenance(Asset asset, bool pending) async {
+    final res = await _client.patch(
+      _uri('/assets/${asset.id}/maintenance'),
+      headers: _jsonHeaders,
+      body: jsonEncode({'pending': pending, 'version': asset.statusVersion}),
+    );
+    if (res.statusCode != 200) _fail(res);
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    asset.maintenancePending = body['maintenance_pending'] as bool;
+    asset.statusVersion = (body['status_version'] as num).toInt();
   }
 
   @override

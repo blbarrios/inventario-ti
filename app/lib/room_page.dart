@@ -9,6 +9,13 @@ import 'inventory_data.dart';
 import 'inventory_repository.dart';
 import 'inventory_theme.dart';
 
+/// The plan is this many times the viewport on each side, so assets and
+/// zones have room to spread out; zoom in to work on a part of it.
+const planScale = 2.0;
+const fitScale = 1 / planScale;
+const maxPlanScale = 5.0;
+Matrix4 fitMatrix() => Matrix4.diagonal3Values(fitScale, fitScale, 1);
+
 class RoomPage extends StatefulWidget {
   const RoomPage({
     super.key,
@@ -27,7 +34,7 @@ class RoomPage extends StatefulWidget {
 }
 
 class _RoomPageState extends State<RoomPage> {
-  final transform = TransformationController();
+  final transform = TransformationController(fitMatrix());
   final viewportKey = GlobalKey();
   final search = TextEditingController();
   Asset? selected;
@@ -218,9 +225,9 @@ class _RoomPageState extends State<RoomPage> {
 
   void zoom(double factor) {
     final current = transform.value.getMaxScaleOnAxis();
-    final next = (current * factor).clamp(1.0, 5.0);
-    if (next == 1) {
-      transform.value = Matrix4.identity();
+    final next = (current * factor).clamp(fitScale, maxPlanScale);
+    if (next == fitScale) {
+      transform.value = fitMatrix();
     } else {
       final viewport = viewportKey.currentContext?.findRenderObject();
       if (viewport is! RenderBox) return;
@@ -536,8 +543,7 @@ class _RoomPageState extends State<RoomPage> {
                                 icon: const Icon(Icons.add_rounded, size: 18)),
                             IconButton(
                                 tooltip: 'Restablecer vista',
-                                onPressed: () =>
-                                    transform.value = Matrix4.identity(),
+                                onPressed: () => transform.value = fitMatrix(),
                                 icon: const Icon(Icons.crop_free_rounded,
                                     size: 18)),
                           ]),
@@ -892,15 +898,18 @@ class _RoomCanvas extends StatelessWidget {
   @override
   Widget build(BuildContext context) =>
       LayoutBuilder(builder: (context, bounds) {
-        final width = bounds.maxWidth;
-        final height = bounds.maxHeight;
-        final compact = width < 335;
+        // The plan is larger than the viewport so there is room to spread
+        // out; the default view (fitScale) shows all of it.
+        final viewWidth = bounds.maxWidth;
+        final width = viewWidth * planScale;
+        final height = bounds.maxHeight * planScale;
+        final compact = viewWidth < 335;
         final markerWidth = compact
-            ? 84.0
-            : width < 520
-                ? 124.0
-                : 152.0;
-        final markerHeight = compact ? 40.0 : 52.0;
+            ? 220.0
+            : viewWidth < 520
+                ? 280.0
+                : 320.0;
+        const markerHeight = 104.0;
         final left = math.min(32.0, math.max(8.0, width * .05));
         final top = math.min(32.0, math.max(8.0, height * .05));
         // Leave room for the floating legend and zoom controls.
@@ -914,9 +923,10 @@ class _RoomCanvas extends StatelessWidget {
           maxScaleFactor: 1.3,
           child: InteractiveViewer(
             transformationController: controller,
-            minScale: 1,
-            maxScale: 5,
-            boundaryMargin: const EdgeInsets.all(400),
+            constrained: false,
+            minScale: fitScale,
+            maxScale: maxPlanScale,
+            boundaryMargin: const EdgeInsets.all(200),
             child: SizedBox(
               width: width,
               height: height,
@@ -1019,7 +1029,8 @@ class Marker extends StatelessWidget {
     return Semantics(
       button: true,
       selected: selected,
-      label: '${asset.code}, ${asset.name}, ${status.label}',
+      label:
+          '${asset.name}, ${asset.assignedLabel}, ${asset.code}, ${status.label}${asset.maintenancePending ? ', Mantenimiento pendiente' : ''}',
       onTap: onTap,
       excludeSemantics: true,
       child: Material(
@@ -1036,30 +1047,32 @@ class Marker extends StatelessWidget {
           child: Padding(
             padding: EdgeInsets.symmetric(horizontal: compact ? 8 : 10),
             child: Row(children: [
-              DeviceGlyph(asset.icon, status, size: compact ? 17 : 20),
+              DeviceGlyph(asset.icon, status, size: compact ? 30 : 36),
               SizedBox(width: compact ? 7 : 10),
               Expanded(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(asset.code,
+                    Text(asset.name,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: monoStyle(size: compact ? 11 : 12.5)),
-                    if (!compact) ...[
-                      const SizedBox(height: 2),
-                      Text(status.label,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                              fontSize: 11.5,
-                              fontWeight: FontWeight.w500,
-                              color: status.color)),
-                    ],
+                        style: TextStyle(
+                            fontSize: compact ? 22 : 24,
+                            fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 4),
+                    Text(asset.assignedLabel,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 22, color: inkFaint)),
                   ],
                 ),
               ),
+              if (asset.maintenancePending)
+                const Tooltip(
+                    message: 'Mantenimiento pendiente',
+                    child: Icon(Icons.build_outlined,
+                        size: 26, color: Color(0xFF8F5607))),
             ]),
           ),
         ),

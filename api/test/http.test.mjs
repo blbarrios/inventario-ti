@@ -236,8 +236,8 @@ test('Una cuenta creada en pgAdmin permite ingresar y revoca sesiones al cambiar
   const password = 'p'.repeat(72);
   const template = readFileSync(new URL('../sql/cuenta-ti.sql', import.meta.url), 'utf8');
   const accountSql = (secret) => template
-    .replace("'tecnico'", () => "'" + username + "'")
-    .replace("'CAMBIAR_POR_UNA_CLAVE_PERSONAL'", () => "'" + secret + "'");
+    .replace(/account_username text :=[^\r\n]*;/, () => "account_username text := '" + username + "';")
+    .replace(/account_password text :=[^\r\n]*;/, () => "account_password text := '" + secret + "';");
   t.after(async () => {
     await pool.query('DELETE FROM auth_users WHERE username = $1', [username]);
     await pool.end();
@@ -258,4 +258,46 @@ test('Una cuenta creada en pgAdmin permite ingresar y revoca sesiones al cambiar
   assert.equal((await fetch(address + '/api/rooms', { headers: { authorization: 'Bearer ' + token } })).status, 401);
   assert.equal((await login(password)).status, 401);
   assert.equal((await login('Nueva clave de prueba 2026!')).status, 200);
+});
+
+test('El tablero global incluye equipos sin sala y conserva el mantenimiento pendiente', async (t) => {
+  const pool = new Pool({ connectionString: process.env.TEST_DATABASE_URL });
+  const suffix = randomUUID();
+  const codes = ['asignado-' + suffix, 'sin-sala-' + suffix];
+  const { rows: [room] } = await pool.query('INSERT INTO rooms(name) VALUES ($1) RETURNING id', [suffix]);
+  t.after(async () => {
+    await pool.query('DELETE FROM asset_status_history WHERE asset_id IN (SELECT id FROM assets WHERE code = ANY($1))', [codes]);
+    await pool.query('DELETE FROM assets WHERE code = ANY($1)', [codes]);
+    await pool.query('DELETE FROM rooms WHERE id = $1', [room.id]);
+    await pool.end();
+  });
+  const { rows: [asset] } = await pool.query(
+    'INSERT INTO assets(code, name, type, room_id, responsible) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+    [codes[0], 'Portátil contabilidad', 'Portátil', room.id, 'Ana Pérez'],
+  );
+  await pool.query('INSERT INTO assets(code, name, type) VALUES ($1, $2, $3)', [codes[1], 'Router de reserva', 'Router']);
+  const url = process.env.TEST_APPLICATION_DATABASE_URL ?? process.env.TEST_DATABASE_URL;
+  const origin = await startApi(t, url);
+  const write = (path, body) => fetch(origin + '/api' + path, {
+    method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+  });
+  let all = await (await fetch(origin + '/api/assets')).json();
+  assert.equal(all.find((row) => row.id === asset.id).room_name, suffix);
+  assert.equal(all.find((row) => row.code === codes[1]).room_name, null);
+  assert.equal(all.find((row) => row.id === asset.id).maintenance_pending, false);
+  const path = '/assets/' + asset.id + '/maintenance';
+  assert.equal((await write(path, { pending: true, version: 1 })).status, 200);
+  assert.equal((await write(path, { pending: false, version: 1 })).status, 409);
+  assert.equal((await write('/assets/' + asset.id + '/status', { status: 'operational', version: 2 })).status, 200);
+  const second = await startApi(t, url);
+  all = await (await fetch(second + '/api/assets')).json();
+  const saved = all.find((row) => row.id === asset.id);
+  assert.equal(saved.maintenance_pending, true);
+  assert.equal(saved.status, 'operational');
+  assert.equal(saved.responsible, 'Ana Pérez');
+  assert.equal((await write('/assets/' + asset.id, { responsible: '' })).status, 200);
+  assert.equal((await write('/assets/' + asset.id, { name: '   ' })).status, 400);
+  assert.equal((await write(path, { pending: false, version: 3 })).status, 200);
+  const updated = await (await fetch(second + '/api/assets/' + asset.id)).json();
+  assert.equal(updated.maintenance_pending, false);
 });

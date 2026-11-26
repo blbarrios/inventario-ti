@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:inventario_ti/main.dart';
+import 'package:inventario_ti/asset_panel.dart';
 
 /// All widget tests run against the in-memory demo repository.
 Widget _app() => InventoryApp(repository: DemoInventoryRepository());
@@ -92,6 +93,8 @@ void main() {
     expect(find.text('Switch principal Cisco'), findsNothing);
     await tester.tap(find.text('Router Starlink'));
     await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('Cambiar estado'), 100,
+        scrollable: find.byType(Scrollable).last);
     expect(find.text('Cambiar estado'), findsOneWidget);
     await tester.tap(find.byTooltip('Cerrar ficha'));
     await tester.pumpAndSettle();
@@ -130,7 +133,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byType(Marker).first);
     await tester.pumpAndSettle();
-    expect(find.text('Switch principal Cisco'), findsOneWidget);
+    expect(find.descendant(of: find.byType(AssetDetail), matching: find.text('Switch principal Cisco')), findsOneWidget);
     expect(find.text('Editar distribución'), findsNothing);
     expect(find.text('Guardar estado'), findsNothing);
   });

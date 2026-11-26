@@ -164,6 +164,8 @@ class Asset {
       DeviceIcon? icon,
       String? id,
       this.responsible = '',
+      this.roomName,
+      this.maintenancePending = false,
       this.statusVersion = 1,
       this.hasPosition = true})
       : id = id ?? code,
@@ -182,6 +184,8 @@ class Asset {
       statusVersion: (json['status_version'] as num?)?.toInt() ?? 1,
       icon: deviceIconFromKey(json['icon'] as String? ?? 'generic'),
       responsible: json['responsible'] as String? ?? '',
+      roomName: json['room_name'] as String?,
+      maintenancePending: json['maintenance_pending'] as bool? ?? false,
       hasPosition: x != null && y != null,
     );
   }
@@ -196,6 +200,10 @@ class Asset {
 
   /// Optional person responsible for this device (free text; '' when none).
   String responsible;
+  String? roomName;
+  bool maintenancePending;
+  String get assignedLabel =>
+      responsible.trim().isEmpty ? 'Sin asignar' : responsible;
   Offset position;
 
   /// Whether the server has a saved position; false until a layout is saved.
@@ -451,6 +459,23 @@ class StatusTag extends StatelessWidget {
               ),
             ),
           ),
+        ],
+      );
+}
+
+class MaintenanceTag extends StatelessWidget {
+  const MaintenanceTag({super.key});
+  @override
+  Widget build(BuildContext context) => const Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.build_outlined, size: 14, color: Color(0xFF8F5607)),
+          SizedBox(width: 5),
+          Flexible(
+              child: Text(
+            'Mantenimiento pendiente',
+            style: TextStyle(fontSize: 12, color: Color(0xFF8F5607)),
+          )),
         ],
       );
 }

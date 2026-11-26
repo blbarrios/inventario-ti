@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'forms.dart';
+import 'all_assets_page.dart';
 import 'auth_gate.dart';
 import 'auth_session.dart';
 import 'inventory_data.dart';
@@ -116,6 +117,13 @@ class _HomePageState extends State<HomePage> {
     ));
   }
 
+  Future<void> openAllAssets() async {
+    await Navigator.of(context).push<void>(MaterialPageRoute(
+      builder: (_) => AllAssetsPage(repo: repo, editable: !presenting),
+    ));
+    if (mounted) await load();
+  }
+
   Future<void> addRoom() async {
     final room =
         await showAddRoomForm(context, repo: repo, existing: rooms ?? const []);
@@ -173,6 +181,15 @@ class _HomePageState extends State<HomePage> {
                   '${rooms.length} salas · $total equipos'
                   '${demo ? ' · datos de demostración' : ''}',
                   style: text.bodyMedium?.copyWith(color: inkFaint),
+                ),
+                const SizedBox(height: 12),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: OutlinedButton.icon(
+                    onPressed: openAllAssets,
+                    icon: const Icon(Icons.devices_outlined),
+                    label: const Text('Todos los equipos'),
+                  ),
                 ),
                 if (presenting) ...[
                   const SizedBox(height: 12),

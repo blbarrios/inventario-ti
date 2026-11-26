@@ -18,6 +18,7 @@ type Id = { Params: { id: string } };
 type StatusChange = { status: Status; version: number; note?: string };
 type AssetInput = { code: string; name: string; type: string; roomId?: string; icon?: Icon; responsible?: string };
 type AssetEdit = { name?: string; type?: string; responsible?: string };
+type MaintenanceChange = { pending: boolean; version: number };
 type RoomInput = { name: string };
 type Position = { assetId: string; x: number; y: number };
 type LayoutItem = {
@@ -97,6 +98,13 @@ export function registerInventoryRoutes(
         ), '[]'::jsonb) AS items
       FROM rooms r WHERE r.id = $1`, [request.params.id]);
     return result.rows[0] ?? reply.code(404).send({ error: 'Sala no encontrada' });
+  });
+
+  app.get('/assets', async () => {
+    const result = await pool.query(
+      'SELECT a.*, r.name AS room_name FROM assets a LEFT JOIN rooms r ON r.id = a.room_id ORDER BY lower(a.name), a.code',
+    );
+    return result.rows;
   });
 
   app.post<{ Body: AssetInput }>('/assets', {
@@ -182,6 +190,32 @@ export function registerInventoryRoutes(
     return reply.code(outcome.code).send(outcome.body);
   });
 
+  app.patch<Id & { Body: MaintenanceChange }>('/assets/:id/maintenance', {
+    schema: {
+      params: idParams,
+      body: {
+        type: 'object', required: ['pending', 'version'], additionalProperties: false,
+        properties: { pending: { type: 'boolean' }, version },
+      },
+    },
+  }, async (request, reply) => {
+    const { pending, version: expected } = request.body;
+    const outcome = await transact(pool, async (client) => {
+      const { rows: [asset] } = await client.query('SELECT * FROM assets WHERE id = $1 FOR UPDATE', [request.params.id]);
+      if (!asset) return { code: 404, body: { error: 'Equipo no encontrado' } };
+      if (asset.status_version !== expected) {
+        return { code: 409, body: { error: 'El equipo cambió. Vuelve a abrir la ficha.', current: asset } };
+      }
+      if (asset.maintenance_pending === pending) return { code: 200, body: asset };
+      const updated = await client.query(
+        'UPDATE assets SET maintenance_pending = $2, status_version = status_version + 1 WHERE id = $1 RETURNING *',
+        [asset.id, pending],
+      );
+      return { code: 200, body: updated.rows[0] };
+    });
+    return reply.code(outcome.code).send(outcome.body);
+  });
+
   app.patch<Id & { Body: AssetEdit }>('/assets/:id', {
     schema: {
       params: idParams,
@@ -199,7 +233,7 @@ export function registerInventoryRoutes(
     if (request.body.name !== undefined) edits.push(['name', request.body.name.trim()]);
     if (request.body.type !== undefined) edits.push(['type', request.body.type.trim()]);
     if (request.body.responsible !== undefined) edits.push(['responsible', request.body.responsible.trim()]);
-    if (edits.some(([, value]) => value === '')) {
+    if (edits.some(([column, value]) => column !== 'responsible' && value === '')) {
       return reply.code(400).send({ error: 'El nombre y el tipo no pueden quedar vacíos' });
     }
     const sets = edits.map(([column], index) => `${column} = $${index + 2}`).join(', ');

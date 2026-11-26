@@ -117,3 +117,18 @@ El servidor respondió HTTP 200 en /api/health con la base conectada. Se comprob
 Se probaron las migraciones y el alta y desactivación por consola contra PostgreSQL 17 local. Las pruebas HTTP verifican contraseña incorrecta, acceso anónimo, bloqueo de origen ajeno, cookie segura, restauración desde otra instancia de la API, token de escritorio, cierre de sesión, expiración, cuenta desactivada, límite de intentos y operador en historial.
 
 El despliegue real, la conexión a PostgreSQL del VPS y el dominio HTTPS se configuran en Dokploy. La sincronización automática entre pantallas sigue pendiente.
+
+
+## Nombre, inventario global y mantenimiento pendiente
+
+El tablero de cada sala muestra el nombre del equipo y debajo la persona responsable. Cuando ese campo está vacío, muestra Sin asignar. El campo Responsable de los formularios se utiliza como propietario o persona asignada.
+
+Desde el inicio, Todos los equipos abre el inventario completo, incluidos los equipos sin sala. Permite buscar por nombre, persona, código o sala. El filtro Mantenimiento pendiente muestra los equipos marcados desde su ficha.
+
+La marca se guarda por separado del estado operativo y puede activarse o quitarse desde la ficha. La migración 005_maintenance_pending añade el campo con valor false para los equipos existentes. Después de desplegar el código actualizado, ejecutar en la consola del contenedor:
+
+```sh
+npm --prefix /app run migrate
+```
+
+Las pruebas verificaron el control de versiones al guardar la marca, su persistencia desde otra instancia de la API, los equipos sin sala y la posibilidad de quitar una asignación. El 26 de noviembre de 2026 pasaron 32 pruebas Flutter y cinco pruebas HTTP con PostgreSQL 17 local. Se comprobó el tablero global y su filtro en Chrome a 1280 y 390 píxeles de ancho.
