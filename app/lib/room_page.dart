@@ -14,7 +14,10 @@ import 'inventory_theme.dart';
 const planScale = 2.0;
 const fitScale = 1 / planScale;
 const maxPlanScale = 5.0;
-Matrix4 fitMatrix() => Matrix4.diagonal3Values(fitScale, fitScale, 1);
+// Scale z too: InteractiveViewer reads the current zoom with
+// getMaxScaleOnAxis(), so a z of 1 would make every zoom look like 1x and
+// let the plan shrink below "fit".
+Matrix4 fitMatrix() => Matrix4.diagonal3Values(fitScale, fitScale, fitScale);
 
 class RoomPage extends StatefulWidget {
   const RoomPage({
@@ -47,7 +50,23 @@ class _RoomPageState extends State<RoomPage> {
   RoomItem? selectedItem;
 
   @override
+  void initState() {
+    super.initState();
+    transform.addListener(_keepPlanFilling);
+  }
+
+  /// The whole visible frame must be plan (and so a valid place to drop an
+  /// asset): never let the view zoom out past "fit". InteractiveViewer's own
+  /// minScale is not enough on web, where wheel zoom can undershoot it.
+  void _keepPlanFilling() {
+    if (transform.value.getMaxScaleOnAxis() < fitScale - 1e-6) {
+      transform.value = fitMatrix();
+    }
+  }
+
+  @override
   void dispose() {
+    transform.removeListener(_keepPlanFilling);
     transform.dispose();
     search.dispose();
     super.dispose();
@@ -236,7 +255,7 @@ class _RoomPageState extends State<RoomPage> {
       transform.value = Matrix4.identity()
         ..translateByDouble(
             center.dx - anchor.dx * next, center.dy - anchor.dy * next, 0, 1)
-        ..scaleByDouble(next, next, 1, 1);
+        ..scaleByDouble(next, next, next, 1);
     }
   }
 
@@ -926,7 +945,9 @@ class _RoomCanvas extends StatelessWidget {
             constrained: false,
             minScale: fitScale,
             maxScale: maxPlanScale,
-            boundaryMargin: const EdgeInsets.all(200),
+            // No margin: panning stops at the plan's edge, so the frame is
+            // never showing empty space outside it.
+            boundaryMargin: EdgeInsets.zero,
             child: SizedBox(
               width: width,
               height: height,
