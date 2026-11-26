@@ -91,7 +91,7 @@ class AssetList extends StatelessWidget {
                       itemCount: filtered.length,
                       itemBuilder: (context, index) {
                         final asset = filtered[index];
-                        return _AssetRow(
+                        return AssetRow(
                           key: ValueKey(asset.code),
                           asset: asset,
                           selected: selected == asset,
@@ -107,15 +107,23 @@ class AssetList extends StatelessWidget {
   }
 }
 
-class _AssetRow extends StatelessWidget {
-  const _AssetRow(
+class AssetRow extends StatelessWidget {
+  const AssetRow(
       {super.key,
       required this.asset,
       required this.selected,
-      required this.onTap});
+      required this.onTap,
+      this.roomName,
+      this.showMaintenance = true});
   final Asset asset;
   final bool selected;
   final VoidCallback onTap;
+
+  /// Shown after the responsible person in lists that span several rooms.
+  final String? roomName;
+
+  /// Off where the whole list is already "mantenimiento pendiente".
+  final bool showMaintenance;
 
   @override
   Widget build(BuildContext context) => Semantics(
@@ -140,11 +148,15 @@ class _AssetRow extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           style: Theme.of(context).textTheme.titleSmall),
                       const SizedBox(height: 3),
-                      Text(asset.assignedLabel,
+                      Text(
+                          roomName == null
+                              ? asset.assignedLabel
+                              : '${asset.assignedLabel}  ·  $roomName',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style:
                               const TextStyle(fontSize: 12.5, color: inkFaint)),
+                      const SizedBox(height: 2),
                       Row(children: [
                         Text(asset.code,
                             style: monoStyle(size: 12, color: inkFaint)),
@@ -159,7 +171,7 @@ class _AssetRow extends StatelessWidget {
                                   color: asset.status.color)),
                         ),
                       ]),
-                      if (asset.maintenancePending) ...[
+                      if (showMaintenance && asset.maintenancePending) ...[
                         const SizedBox(height: 4),
                         const MaintenanceTag(),
                       ],
@@ -249,8 +261,10 @@ class _AssetDetailState extends State<AssetDetail> {
       widget.onSaved();
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('$error')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(error is ApiException
+                ? error.message
+                : 'No se pudo guardar el mantenimiento.')));
       }
     } finally {
       if (mounted) setState(() => savingMaintenance = false);
@@ -355,13 +369,27 @@ class _AssetDetailState extends State<AssetDetail> {
             _CurrentStatus(asset.status),
             const SizedBox(height: 12),
             if (widget.editable)
-              SwitchListTile.adaptive(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Mantenimiento pendiente'),
-                subtitle:
-                    const Text('Marca el equipo cuando ya necesite atención.'),
-                value: asset.maintenancePending,
-                onChanged: saving || savingMaintenance ? null : setMaintenance,
+              // Same framed-row language as the current-status block above.
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  border: Border.all(color: hairline),
+                  borderRadius: BorderRadius.circular(radiusControl + 2),
+                ),
+                child: SwitchListTile.adaptive(
+                  contentPadding: const EdgeInsets.fromLTRB(14, 2, 8, 2),
+                  secondary: Icon(Icons.build_outlined,
+                      size: 18,
+                      color: asset.maintenancePending
+                          ? maintenanceInk
+                          : inkFaint),
+                  title: Text('Mantenimiento pendiente',
+                      style: text.titleSmall),
+                  subtitle: Text('Márcalo cuando el equipo necesite revisión.',
+                      style: text.bodySmall),
+                  value: asset.maintenancePending,
+                  onChanged:
+                      saving || savingMaintenance ? null : setMaintenance,
+                ),
               )
             else if (asset.maintenancePending)
               const MaintenanceTag(),
@@ -590,3 +618,36 @@ class _StatusPicker extends StatelessWidget {
         ]),
       );
 }
+
+/// Opens an asset's detail as a bottom sheet (used by lists that span rooms).
+Future<void> showAssetSheet(
+  BuildContext context, {
+  required Asset asset,
+  required InventoryRepository repo,
+  required String roomName,
+  required bool editable,
+  required VoidCallback onSaved,
+}) =>
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      backgroundColor: sheet,
+      constraints: const BoxConstraints(maxWidth: 560),
+      builder: (sheetContext) => FractionallySizedBox(
+        heightFactor: .92,
+        child: Padding(
+          padding: EdgeInsets.only(
+              bottom: MediaQuery.viewInsetsOf(sheetContext).bottom),
+          child: AssetDetail(
+            asset: asset,
+            repo: repo,
+            roomName: roomName,
+            editable: editable,
+            onClose: () => Navigator.pop(sheetContext),
+            onSaved: onSaved,
+          ),
+        ),
+      ),
+    );

@@ -3,6 +3,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'forms.dart';
 import 'all_assets_page.dart';
+import 'asset_panel.dart';
 import 'auth_gate.dart';
 import 'auth_session.dart';
 import 'inventory_data.dart';
@@ -117,12 +118,24 @@ class _HomePageState extends State<HomePage> {
     ));
   }
 
-  Future<void> openAllAssets() async {
+  Future<void> openAllAssets({bool onlyPending = false}) async {
     await Navigator.of(context).push<void>(MaterialPageRoute(
-      builder: (_) => AllAssetsPage(repo: repo, editable: !presenting),
+      builder: (_) => AllAssetsPage(
+          repo: repo, editable: !presenting, onlyPending: onlyPending),
     ));
     if (mounted) await load();
   }
+
+  Future<void> openAsset(Asset asset, Room room) => showAssetSheet(
+        context,
+        asset: asset,
+        repo: repo,
+        roomName: room.name,
+        editable: !presenting,
+        onSaved: () {
+          if (mounted) setState(() {});
+        },
+      );
 
   Future<void> addRoom() async {
     final room =
@@ -162,6 +175,11 @@ class _HomePageState extends State<HomePage> {
     final text = Theme.of(context).textTheme;
     final total = rooms.fold(0, (sum, room) => sum + room.assets.length);
     final demo = repo is DemoInventoryRepository;
+    final pending = [
+      for (final room in rooms)
+        for (final asset in room.assets)
+          if (asset.maintenancePending) (asset, room),
+    ];
     return LayoutBuilder(builder: (context, bounds) {
       final wide = bounds.maxWidth >= 840;
       final gutter = wide ? 40.0 : 16.0;
@@ -173,23 +191,34 @@ class _HomePageState extends State<HomePage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Semantics(
-                    header: true,
-                    child: Text('Espacios', style: text.headlineMedium)),
-                const SizedBox(height: 6),
-                Text(
-                  '${rooms.length} salas · $total equipos'
-                  '${demo ? ' · datos de demostración' : ''}',
-                  style: text.bodyMedium?.copyWith(color: inkFaint),
-                ),
-                const SizedBox(height: 12),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: OutlinedButton.icon(
-                    onPressed: openAllAssets,
-                    icon: const Icon(Icons.devices_outlined),
-                    label: const Text('Todos los equipos'),
-                  ),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Semantics(
+                              header: true,
+                              child: Text('Espacios',
+                                  style: text.headlineMedium)),
+                          const SizedBox(height: 6),
+                          Text(
+                            '${rooms.length} salas · $total equipos'
+                            '${demo ? ' · datos de demostración' : ''}',
+                            style: text.bodyMedium?.copyWith(color: inkFaint),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    OutlinedButton.icon(
+                      onPressed: () => openAllAssets(),
+                      icon: const Icon(Icons.format_list_bulleted_rounded,
+                          size: 18),
+                      label: Text(wide ? 'Todos los equipos' : 'Equipos'),
+                    ),
+                  ],
                 ),
                 if (presenting) ...[
                   const SizedBox(height: 12),
@@ -197,6 +226,14 @@ class _HomePageState extends State<HomePage> {
                 ],
                 SizedBox(height: wide ? 32 : 24),
                 _StatusOverview(rooms: rooms, wide: wide),
+                if (pending.isNotEmpty) ...[
+                  SizedBox(height: wide ? 40 : 28),
+                  _MaintenanceSection(
+                    pending: pending,
+                    onOpen: openAsset,
+                    onSeeAll: () => openAllAssets(onlyPending: true),
+                  ),
+                ],
                 SizedBox(height: wide ? 40 : 28),
                 Semantics(
                   header: true,
@@ -505,6 +542,69 @@ class _StatusOverview extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// Assets flagged "mantenimiento pendiente", across every room: the work
+/// queue, shown right under the health summary.
+class _MaintenanceSection extends StatelessWidget {
+  const _MaintenanceSection(
+      {required this.pending, required this.onOpen, required this.onSeeAll});
+  final List<(Asset, Room)> pending;
+  final void Function(Asset, Room) onOpen;
+  final VoidCallback onSeeAll;
+
+  static const _visible = 5;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    final shown = pending.take(_visible).toList();
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          const Icon(Icons.build_outlined, size: 16, color: maintenanceInk),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Semantics(
+              header: true,
+              child: Text('Mantenimiento pendiente',
+                  style: text.titleMedium?.copyWith(color: inkSoft)),
+            ),
+          ),
+          Text('${pending.length}', style: monoStyle(color: inkFaint)),
+        ],
+      ),
+      const SizedBox(height: 10),
+      SheetSurface(
+        child: Padding(
+          padding: const EdgeInsets.all(8),
+          child: Column(children: [
+            for (final (asset, room) in shown)
+              AssetRow(
+                key: ValueKey(asset.id),
+                asset: asset,
+                selected: false,
+                roomName: room.name,
+                showMaintenance: false,
+                onTap: () => onOpen(asset, room),
+              ),
+            if (pending.length > _visible) ...[
+              const Divider(indent: 8, endIndent: 8),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: onSeeAll,
+                  icon: const Icon(Icons.arrow_forward_rounded, size: 18),
+                  label: Text('Ver los ${pending.length} equipos'),
+                ),
+              ),
+            ],
+          ]),
+        ),
+      ),
+    ]);
   }
 }
 

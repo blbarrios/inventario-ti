@@ -1072,7 +1072,7 @@ class Marker extends StatelessWidget {
                 const Tooltip(
                     message: 'Mantenimiento pendiente',
                     child: Icon(Icons.build_outlined,
-                        size: 26, color: Color(0xFF8F5607))),
+                        size: 26, color: maintenanceInk)),
             ]),
           ),
         ),

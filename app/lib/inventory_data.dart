@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 
 import 'inventory_theme.dart';
 
+/// Amber text/icon colour for maintenance (status and pending flag); 4.5:1+.
+const maintenanceInk = Color(0xFF8F5607);
+
 enum AssetStatus { unknown, operational, faulty, maintenance, offline }
 
 /// Most urgent first: the order used in every summary, legend and tag row.
@@ -27,7 +30,7 @@ extension StatusView on AssetStatus {
         AssetStatus.unknown => inkFaint,
         AssetStatus.operational => const Color(0xFF1D7148),
         AssetStatus.faulty => const Color(0xFFB4232A),
-        AssetStatus.maintenance => const Color(0xFF8F5607),
+        AssetStatus.maintenance => maintenanceInk,
         AssetStatus.offline => inkSoft,
       };
 
@@ -469,13 +472,18 @@ class MaintenanceTag extends StatelessWidget {
   Widget build(BuildContext context) => const Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.build_outlined, size: 14, color: Color(0xFF8F5607)),
+          Icon(Icons.build_outlined, size: 13, color: maintenanceInk),
           SizedBox(width: 5),
           Flexible(
-              child: Text(
-            'Mantenimiento pendiente',
-            style: TextStyle(fontSize: 12, color: Color(0xFF8F5607)),
-          )),
+            child: Text(
+              'Mantenimiento pendiente',
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w500,
+                  color: maintenanceInk),
+            ),
+          ),
         ],
       );
 }

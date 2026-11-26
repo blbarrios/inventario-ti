@@ -39,7 +39,7 @@ void main() {
     await tester.tap(find.byType(FilterChip));
     await tester.pumpAndSettle();
     expect(find.text('1 de 7 equipos'), findsOneWidget);
-    expect(find.text('Ana Pérez'), findsOneWidget);
+    expect(find.textContaining('Ana Pérez'), findsOneWidget);
     expect(find.text('Router Starlink'), findsNothing);
     await tester.enterText(find.byType(TextField), 'ana');
     await tester.pumpAndSettle();
@@ -52,5 +52,25 @@ void main() {
     await tester.pumpAndSettle();
     expect(asset.maintenancePending, false);
     expect(asset.status, AssetStatus.unknown);
+  });
+
+  testWidgets('El inicio lista los equipos con mantenimiento pendiente',
+      (tester) async {
+    final repo = DemoInventoryRepository();
+    final rooms = await repo.loadRooms();
+    final asset = rooms.first.assets.first;
+    await tester.pumpWidget(InventoryApp(repository: repo));
+    await tester.pumpAndSettle();
+    expect(find.text('Mantenimiento pendiente'), findsNothing);
+
+    await repo.updateMaintenance(asset, true);
+    await tester.pumpWidget(InventoryApp(repository: repo, key: UniqueKey()));
+    await tester.pumpAndSettle();
+    expect(find.text('Mantenimiento pendiente'), findsOneWidget);
+    expect(find.text(asset.name), findsOneWidget);
+
+    await tester.tap(find.text(asset.name));
+    await tester.pumpAndSettle();
+    expect(find.byType(SwitchListTile), findsOneWidget);
   });
 }

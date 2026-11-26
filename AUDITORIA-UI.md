@@ -153,3 +153,11 @@ Aplicar las migraciones nuevas antes de usar la API con datos reales:
 npm --prefix api run migrate
 ```
 Sigue pendiente lo de antes: auth de TI para producción y SSE en vivo.
+
+## Auditoría de «Todos los equipos» y mantenimiento pendiente
+
+- **Inicio:** nueva sección «Mantenimiento pendiente», bajo el resumen de estado. Muestra hasta 5 equipos, con su persona y su sala, y abre la ficha en una hoja inferior. Si hay más, lleva a «Todos los equipos» con el filtro activado.
+- **Cabecera del inicio:** «Todos los equipos» pasó a estar a la derecha del título («Equipos» en móvil).
+- **Todos los equipos:** usa los mismos componentes que la lista de cada sala (`AssetRow`, `SheetSurface`), con íconos redondeados, buscador con botón para limpiar, estados de carga, error y vacío como en el inicio, y un filtro con su contador.
+- **Ficha:** el interruptor de mantenimiento va en un recuadro, igual que el estado actual. Los errores muestran un mensaje legible en lugar de la excepción.
+- **Token `maintenanceInk`:** reemplaza el ámbar `0xFF8F5607` que estaba repetido en cuatro sitios.
